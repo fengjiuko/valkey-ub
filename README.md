@@ -232,6 +232,9 @@ Using `--tls-cluster yes` makes Valkey Cluster use TLS across nodes.
 
 # Running Valkey with RDMA:
 
+For non-root, read-only environment checks and the validation plan maintained in
+this fork, see [RDMA / UB 环境检查与验证资料](docs/rdma/README.zh-CN.md).
+
 Note that Valkey Over RDMA is an experimental feature.
 It may be changed or removed in any minor or major version.
 Currently, it is only supported on Linux.
