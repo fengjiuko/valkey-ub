@@ -558,6 +558,7 @@ int RedisRegisterConnectionTypeSocket(void);
 int RedisRegisterConnectionTypeUnix(void);
 int RedisRegisterConnectionTypeTLS(void);
 int RegisterConnectionTypeRdma(void);
+int RegisterConnectionTypeUrma(void);
 
 /* Return 1 if connection is using TLS protocol, 0 if otherwise. */
 static inline int connIsTLS(connection *conn) {

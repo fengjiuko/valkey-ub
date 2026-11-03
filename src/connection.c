@@ -55,6 +55,7 @@ int connTypeInitialize(void) {
 
     /* may fail if without BUILD_RDMA=yes */
     RegisterConnectionTypeRdma();
+    RegisterConnectionTypeUrma();
 
     return C_OK;
 }
