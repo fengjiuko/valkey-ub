@@ -1,6 +1,7 @@
 # 原生 URMA 接入与远端内存演进计划
 
-状态：待用户审阅；尚未开始源码实现。日期：2026-11-03。
+状态：用户已通过“继续”授权本地实现；U2 已完成，U3 的独立流模型已实现，
+SDK、ConnectionType 接线及硬件验收待完成。日期：2026-11-03。
 
 ## 目标与范围
 
@@ -18,6 +19,7 @@ CLI 与 benchmark 的端到端闭环，再扩展 I/O 线程和内部通信链路
 - [原生通信设计](urma-architecture.md)
 - [远端内存研究路线](remote-memory-roadmap.md)
 - [上游讨论草稿](upstream-issue-draft.md)
+- [基础模块验证记录](validation-2026-11-03.md)
 
 ## 依据与本地检查
 
@@ -27,13 +29,15 @@ CLI 与 benchmark 的端到端闭环，再扩展 I/O 线程和内部通信链路
 - 用户本地没有测试机；真实设备验证在内网 clone 后进行。
 - Windows 本地已有 MinGW GCC、CMake；WSL Ubuntu 26.04.1 中确认有 GCC、
   G++、Make、Python 和 pkg-config，未发现 URMA 头文件及 UB 设备。
-  WSL 中未发现 CMake、Tcl 和 clang-format-18；测试依赖还需补齐。
+  本轮已在 WSL 补齐 CMake、Tcl、clang-format-18、gtest/gmock；
+  Make/CMake 的 libc 构建和基础模块测试已执行，具体边界见验证记录。
 - 不将 WSL 测试通过等同于 aarch64/鲲鹏 950 或 UB 硬件支持。
 - 本地没有既存 `tasks/plan.md`、`tasks/todo.md`；本次不覆盖其他计划。
 
 本地自定义 skills 已检查：任务拆解、接口设计、模块设计、架构记录、代码审查、
-完成前验证；开始编写 C++ 测试时再应用 cpp-testing，内存错误排查时应用 ASan
-及系统调试相关 skill。当前不需要并行代理。
+完成前验证；本轮源码开发同时应用 cpp-testing、property-based-testing、
+address-sanitizer 及 systematic-debugging。测试使用固定种子的动作序列和
+编解码循环，不增加属性测试框架依赖。当前不需要并行代理。
 
 ## SDK 基线
 
@@ -90,8 +94,7 @@ gtest 测试使用简洁 C 风格。对协议输入验证及状态机条件做�
 
 ## 待确认事项
 
-1. 用户审阅本计划，确认可进入源码实现。
-2. 内网机器的 OS、实际内核、UB 设备/provider、UMDK/URMA/驱动/固件组合。
-3. 引导通道使用 TLS 的部署凭据，以及原生数据通道的机密性要求。
-4. C 客户端作为 Valkey 捆绑依赖的配套补丁还是同步到独立 libvalkey 仓库。
-5. 内存容量扩展是否要求在远端节点故障后继续提供已确认写入的数据。
+1. 内网机器的 OS、实际内核、UB 设备/provider、UMDK/URMA/驱动/固件组合。
+2. 引导通道使用 TLS 的部署凭据，以及原生数据通道的机密性要求。
+3. C 客户端作为 Valkey 捆绑依赖的配套补丁还是同步到独立 libvalkey 仓库。
+4. 内存容量扩展是否要求在远端节点故障后继续提供已确认写入的数据。
