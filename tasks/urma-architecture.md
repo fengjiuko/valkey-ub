@@ -1,7 +1,8 @@
 # 原生 URMA 通信：本地设计工作稿
 
-状态：本地实验方案；protocol 和 session 基础模块已实现，其余组件仍为拟议设计。
-没有原生 URMA ConnectionType 或硬件兼容性声明。
+状态：本地实验方案；protocol、session、真实 SDK runtime 和入站 ConnectionType
+源码已实现。尚无 UB 硬件兼容性或生产可用性声明。具体证据见
+[本轮记录](validation-urma-runtime-2026-11-03.md)。
 适用基线和 SDK 快照见 [计划](plan.md)。上游讨论草稿见
 [跟踪草稿](upstream-issue-draft.md)，尚未发布。
 
@@ -33,7 +34,8 @@ src/urma_protocol.[ch] : explicit wire encoding and validation
 libvalkey URMA adapter : corresponding client stream contract
 ```
 
-`urma.c` 拟负责监听、accept/connect、回调与 ae；transport 拟直接调用 liburma，
+`urma.c` 已接入监听、异步 accept、回调与 ae 定时轮询；出站 connect 尚不支持。
+transport 已直接调用 liburma，
 管理 Jetty、Segment、硬件完成和销毁；现有 session 只管理有界字节流、信用及
 本地缓冲，protocol 只处理帧和能力协商，不理解 Key/Value。
 图中的 session 是 transport 使用的状态组件；它自身不调用 liburma。
@@ -66,8 +68,8 @@ libvalkey URMA adapter : corresponding client stream contract
 - transport 的进展处理返回待通知事件，不直接执行 Valkey 命令回调。
 
 接口在实现时用 C、opaque session 和少量函数表达；不公开 liburma 内部对象。
-目前 protocol/session 的函数签名已经随实现落地；adapter/runtime 的接口待对应
-实现确定。现有基础模块由单元测试调用，尚未接入业务连接路径。
+目前 protocol/session/transport 的函数签名已随实现落地；入站 adapter 已接入业务
+连接路径。它是默认关闭的实验代码，仍待双机生命周期与 SDK/provider 契约验收。
 
 ## 已实现的实验帧契约
 
@@ -91,14 +93,30 @@ HELLO payload 固定 16 字节：支持能力位 8 字节、最大 DATA 长度 4
 本端接收槽数 4 字节。最大 DATA 上限 65536 字节，每端槽数上限 1024；
 实际 payload 取双方最小值，发送信用取对端槽数。必需能力必须被双方支持。
 DATA 不允许空 payload，偏移加长度不得溢出；CREDIT/CLOSE 不携带 payload。
-端点描述、模式选择、随机代次生成及身份认证仍由未来引导流程实现。
+HELLO 本身不包含端点描述或身份认证；引导实现与限制见下段。
+
+当前实验引导已实现随机代次及固定模式 endpoint 交换，身份认证/TLS 尚未实现。
+顺序为：服务端 HELLO（56 字节）、客户端 HELLO（56 字节）、服务端 endpoint
+（64 字节）、客户端 endpoint（64 字节）、服务端 `RDY1`（4 字节）。
+endpoint 中整数同样为大端，EID 保持 SDK 公开定义的 16 字节网络序表示：
+
+| 偏移 | 长度 | Endpoint 字段 |
+| --- | --- | --- |
+| 0 | 4 | Magic：ASCII `VKUE` |
+| 4 | 4 | 版本 1、RC=2、OT=1、RTP=0，各一字节 |
+| 8 | 24 | 数据 Jetty：EID 16 字节、UASID 4 字节、ID 4 字节 |
+| 32 | 24 | CREDIT Jetty：同上 |
+| 56 | 4 | 数据接收 Token |
+| 60 | 4 | CREDIT 接收 Token |
+
+Token 必须按凭据处理，不能输出到日志。这版 endpoint 不是认证或加密协议。
 
 `urmaSessionWrite` 接受前缀后返回自有缓冲上的 DATA 和 operation id；临时投递
 失败必须保留并重试同一帧，禁止跳过后发送后续帧。本地完成只释放本地发送槽。
 `urmaSessionRepostTicket` 给出最早已读完的接收槽票据；runtime 确认真实 repost
 成功后才能调用 `urmaSessionReposted` 生成累计 CREDIT。重复信用不重复授权。
 
-当前每会话一次申请 RX/TX 槽和数据，协议上限时约 128 MiB 加元数据；这只是
+独立流模型每会话一次申请 RX/TX 槽和数据，协议上限时约 128 MiB 加元数据；这只是
 单会话边界，不是可接受的默认配置。runtime 必须在创建前执行全局内存额度准入，
 并计入注册/线缓冲及控制资源开销。模型不管理硬件接收缓冲或全局额度。
 `urmaSessionFree` 在 TX 仍被借用时拒绝释放，但不证明 DMA 已停止；runtime
@@ -142,6 +160,11 @@ DATA 承载 RESP 字节片段，不按 Key 或命令分帧；控制类型包括 
 后续优化，必须证明可安全回收全部相关缓冲区。
 
 ## 事件、线程和销毁
+
+当前实现使用 1ms 定时轮询，每连接每轮最多 64 个完成；还没有实现硬件事件
+fd 的 ack/rearm，下面相关流程仍是后续目标。引导 socket 等待有 5 秒期限；
+同步 SDK import/bind/delete 不会被这个计时器打断，其时间上界须在内网核验。
+当前服务端固定使用设备报告支持的 RC/RTP/OT；不满足时拒绝，没有模式回退。
 
 首版资源只由主线程操作，先不声明 I/O 线程兼容。开启不支持的组合应明确拒绝。
 完成事件每轮有预算，重装通知后再检查队列；具体 ack/rearm 顺序按固定 SDK

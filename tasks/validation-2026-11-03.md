@@ -1,6 +1,8 @@
 # URMA 基础模块验证记录
 
 日期：2026-11-03。源码提交：`f20127470`（协议）、`4ec3745ba`（会话模型）。
+本记录描述基础模块完成时的验证；后续 SDK/runtime 和 ConnectionType 进展见
+[下一批记录](validation-urma-runtime-2026-11-03.md)。
 分支：`work/urma-native-design`。这两批改动分别为五个文件，并带 DCO 签名。
 
 ## 验证范围与环境

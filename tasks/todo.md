@@ -20,7 +20,7 @@
 
 依赖：P0。范围：SDK 基线记录、平台探测说明及独立最小探针，最多五个文件。
 
-- [ ] 固定头文件与库版本，普通 Linux 主机完成编译链接验证。
+- [x] 固定参考 SHA 并校验 core/common 文件，普通 Linux 完成真实库编译链接。
 - [ ] 内网记录 uname、架构/页大小、包版本、SONAME、驱动/固件及设备能力。
 - [ ] 两台真实 UB 主机验证可靠性、顺序、事件通知和资源销毁保证。
 
@@ -47,31 +47,35 @@
 - [x] 校验连续前缀写入、部分读取、AGAIN/EOF/ERROR 转换及重复信用。
 - [x] 覆盖收到数据后关闭、错误代次/重复完成、乱序完成和有限队列容量。
 - [x] 独立模型以显式完成输入验证缓冲生命周期，不引入通用 provider 抽象。
-- [ ] 在实际 runtime 为控制收发保留独立资源，并执行全局内存准入。
-- [ ] 在 runtime 接入超时和直接 liburma 调用，验证 DMA 停止后的销毁保证。
+- [x] runtime 为 CREDIT 保留独立 Jetty/槽，创建前执行全局应用缓冲准入。
+- [x] 生产 runtime 直接调用 liburma，握手有 5 秒超时；失败销毁保留资源待重试。
+- [ ] 完善传输进展超时、异步设备错误处理，并在目标 provider 验证 DMA 终止。
 
-验证：12 项 `UrmaSessionTest` 已通过，包括 1024 轮槽位复用和二进制字节守恒；
+验证：13 项 `UrmaSessionTest` 已通过，包括 1024 轮槽位复用和二进制字节守恒；
 与协议测试一同通过 ASan/UBSan。错误地复用尚未重新投递的槽位会被变异测试检出。
-这是内存中的流模型验证，U3 的 runtime 项与 U4 的设备验证仍未完成。
+流模型验证不包含硬件；runtime 另有 SDK seam 测试。U3 的剩余超时/事件项与
+U4 的设备验收仍未完成。
 
 ## U4：在真实 liburma 上实现 Session 收发
 
 依赖：U1 的 SDK 契约和 U3。范围：transport.[ch]、双机探针及相关构建接线。
 
-- [ ] 实现资源创建、接收投递、提交、完成分类和安全释放。
-- [ ] 部分初始化失败及资源耗尽有界处理，不将失败伪装成成功。
+- [x] 实现资源创建、接收投递、提交、完成分类，以及成功删除后注销/释放的路径。
+- [x] SDK seam 覆盖部分初始化失败、资源耗尽、重试、错误完成及删除失败保留额度。
 - [ ] 在真实双机测试中传输随机二进制流并验证内容与顺序。
 
-验证：固定 SDK 编译链接；探针比较长度和内容校验；反复连接/关闭及故障后
+软件验证见 [runtime 记录](validation-urma-runtime-2026-11-03.md)，不能代表硬件验收。
+内网验证：探针比较长度和内容校验；反复连接/关闭及故障后
 资源回到基线。完成记录日志不输出 Token 或敏感数据。
 
 ## U5：实现 ConnectionType adapter 与监听准入
 
 依赖：U4。范围：urma.c、connection.[ch] 及默认关闭的构建接线；过大时拆批。
 
-- [ ] 接入 read/write/writev、pending data、事件和 connhelpers 生命周期。
-- [ ] connAccept 完成回调只触发一次；保留 barrier 和 postpone 语义。
-- [ ] 未协商完成不能交付 RESP；maxclients 与握手额度在昂贵分配之前执行。
+- [x] 入站 adapter 接入 read/write/writev、pending data、定时轮询和 connhelpers。
+- [x] 实现完成回调取出并清空、barrier 顺序和 postpone 检查，握手前不交付 RESP。
+- [x] maxclients 与 64 个并发握手准入在 transport 创建之前执行。
+- [ ] 在真实双机验收回调内关闭、迟到完成、短读写和异常生命周期；接入硬件通知。
 
 验证：针对 adapter 的契约测试；默认构建 `make -j2`；真实 SDK 可选构建及
 不完整握手/断连测试。不能以占位监听实现通过验收。
@@ -80,11 +84,12 @@
 
 依赖：U5。范围：server.c、config.c、server.h、urma.c 和配置说明，按实际 diff 拆批。
 
-- [ ] 默认关闭，缺依赖/设备或不支持 I/O 线程组合时明确拒绝。
+- [x] 默认关闭；缺依赖/设备或多 I/O 线程组合明确拒绝，启动软件测试通过。
 - [ ] 区分引导地址和 URMA 端点，不把 EID 或同 Fabric 错认成本地可信地址。
 - [ ] AUTH/ACL、protected mode 和资源限制保持有效；机密性要求有明确方案。
 
-验证：配置合法/非法测试、AUTH/ACL/protected mode 和地址输出回归；
+验证：默认值/不可变配置及启动拒绝已执行；AUTH/ACL/protected mode 和地址输出
+仍需真实 URMA 回归；
 真实连接统计证明 URMA 数据路径，覆盖内存额度耗尽。
 
 ## U7：实现匹配的 libvalkey 客户端

@@ -1,7 +1,8 @@
 # 原生 URMA 接入与远端内存演进计划
 
-状态：用户已通过“继续”授权本地实现；U2 已完成，U3 的独立流模型已实现，
-SDK、ConnectionType 接线及硬件验收待完成。日期：2026-11-03。
+状态：用户已授权本地实现及推送到 `fengjiuko/valkey-ub`；U2、SDK 核心编译、
+runtime 和实验性入站 ConnectionType 源码已实现。真实 UB 验收及客户端配套待完成。
+日期：2026-11-03。
 
 ## 目标与范围
 
@@ -20,6 +21,7 @@ CLI 与 benchmark 的端到端闭环，再扩展 I/O 线程和内部通信链路
 - [远端内存研究路线](remote-memory-roadmap.md)
 - [上游讨论草稿](upstream-issue-draft.md)
 - [基础模块验证记录](validation-2026-11-03.md)
+- [SDK/runtime/ConnectionType 验证记录](validation-urma-runtime-2026-11-03.md)
 
 ## 依据与本地检查
 
@@ -28,7 +30,8 @@ CLI 与 benchmark 的端到端闭环，再扩展 I/O 线程和内部通信链路
   鲲鹏 950 不是 Linux 内核版本。
 - 用户本地没有测试机；真实设备验证在内网 clone 后进行。
 - Windows 本地已有 MinGW GCC、CMake；WSL Ubuntu 26.04.1 中确认有 GCC、
-  G++、Make、Python 和 pkg-config，未发现 URMA 头文件及 UB 设备。
+  G++、Make、Python 和 pkg-config；系统未安装 URMA 开发包，未发现 UB 设备。
+  本轮取得固定快照的 core/common 文件并核对 blob SHA，在临时目录构建真实 liburma。
   本轮已在 WSL 补齐 CMake、Tcl、clang-format-18、gtest/gmock；
   Make/CMake 的 libc 构建和基础模块测试已执行，具体边界见验证记录。
 - 不将 WSL 测试通过等同于 aarch64/鲲鹏 950 或 UB 硬件支持。
@@ -83,7 +86,9 @@ UMDK 镜像发布说明最新条目为 `v26.06.0`，发布说明日期 2026-06-3
 目前没有已知的跟踪 issue 或维护者共识，因此本次仅在 `tasks/` 写本地工作文档，
 不把它们冒充已批准的上游设计，不改 `design-docs/`。
 上游草稿尚未发布；发布、发 PR 或推送前须有相应授权及用户 fork。
-当前 origin 是上游 `valkey-io/valkey`，不能向它推送或直接推送 unstable。
+origin 保留上游 `valkey-io/valkey`；fork 远端为用户指定的
+`https://github.com/fengjiuko/valkey-ub.git`，工作分支跟踪同名远端分支。
+推送已获用户授权，不推上游或 unstable；没有创建 issue/PR 或执行发布。
 
 ## 验证原则
 
