@@ -429,6 +429,21 @@ ifeq ($(BUILD_RDMA),yes)
 	FINAL_LIBS += ../deps/libvalkey/lib/libvalkey_rdma.a $(RDMA_LIBS)
 endif
 
+ifneq ($(strip $(BUILD_URMA)),)
+ifeq ($(filter $(BUILD_URMA),yes no),)
+$(error BUILD_URMA must be yes or no)
+endif
+endif
+ifeq ($(BUILD_URMA),yes)
+ifneq ($(uname_S),Linux)
+$(error BUILD_URMA=yes is supported only on Linux)
+endif
+URMA_CFLAGS ?= -isystem /usr/include/ub/umdk/urma
+URMA_LIBS ?= -lurma
+FINAL_CFLAGS += -DUSE_URMA $(URMA_CFLAGS)
+FINAL_LIBS += $(URMA_LIBS)
+endif
+
 RDMA_MODULE=
 RDMA_MODULE_NAME:=valkey-rdma$(PROG_SUFFIX).so
 RDMA_MODULE_CFLAGS:=$(FINAL_CFLAGS)
@@ -627,6 +642,7 @@ ENGINE_SERVER_OBJ = \
     unix.o \
     urma_protocol.o \
     urma_session.o \
+    urma_transport.o \
     util.o \
     valkey-check-aof.o \
     valkey-check-rdb.o \
@@ -739,6 +755,9 @@ persist-settings: distclean
 	echo BUILD_TLS=$(BUILD_TLS) >> .make-settings
 	echo OPENSSL_PREFIX=$(OPENSSL_PREFIX) >> .make-settings
 	echo BUILD_RDMA=$(BUILD_RDMA) >> .make-settings
+	echo BUILD_URMA=$(BUILD_URMA) >> .make-settings
+	echo 'URMA_CFLAGS=$(URMA_CFLAGS)' >> .make-settings
+	echo 'URMA_LIBS=$(URMA_LIBS)' >> .make-settings
 	echo BUILD_ZSTD=$(BUILD_ZSTD) >> .make-settings
 	echo ZSTD_PREFIX=$(ZSTD_PREFIX) >> .make-settings
 	echo USE_SYSTEMD=$(USE_SYSTEMD) >> .make-settings

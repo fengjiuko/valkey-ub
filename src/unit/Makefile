@@ -236,7 +236,11 @@ ifeq ($(USE_LIBBACKTRACE),yes)
     LD_LIBS += -lbacktrace
 endif
 
-# Add TLS libraries if enabled
+# Add optional transport libraries if enabled
+ifeq ($(BUILD_URMA),yes)
+	LD_LIBS += $(URMA_LIBS)
+endif
+
 ifeq ($(BUILD_TLS),yes)
 	LD_LIBS += $(TLS_LIBS)
 endif

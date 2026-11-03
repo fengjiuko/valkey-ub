@@ -218,6 +218,18 @@ else ()
     set(USE_RDMA 0)
 endif ()
 
+option(BUILD_URMA "Build experimental native URMA server transport" OFF)
+if (BUILD_URMA)
+    if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR "BUILD_URMA requires Linux")
+    endif ()
+    find_path(URMA_INCLUDE_DIR urma_api.h PATH_SUFFIXES ub/umdk/urma REQUIRED)
+    find_library(URMA_LIBRARY NAMES urma REQUIRED)
+    add_valkey_server_compiler_options("-DUSE_URMA")
+    include_directories(SYSTEM "${URMA_INCLUDE_DIR}")
+    list(APPEND SERVER_LIBS "${URMA_LIBRARY}")
+endif ()
+
 set(BUILDING_ARM64 0)
 set(BUILDING_ARM32 0)
 

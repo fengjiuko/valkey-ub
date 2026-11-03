@@ -223,6 +223,9 @@ if (USE_TLS)
     # Add required libraries needed for TLS
     target_link_libraries(valkey-unit-gtests PRIVATE OpenSSL::SSL valkey::valkey_tls)
 endif ()
+if (BUILD_URMA)
+    target_link_libraries(valkey-unit-gtests PRIVATE "${URMA_LIBRARY}")
+endif ()
 
 if (APPLE)
     # Symbol wrapping for macOS.
