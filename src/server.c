@@ -6577,6 +6577,11 @@ sds genValkeyInfoString(dict *section_dict, int all_sections, int everything) {
         info = getListensInfoString(info);
     }
 
+    if (all_sections || dictFind(section_dict, "urma") != NULL) {
+        if (sections++) info = sdscat(info, "\r\n");
+        info = genUrmaInfoString(info);
+    }
+
     /* TLS */
     if (all_sections || (dictFind(section_dict, "tls") != NULL)) {
         if (sections++) info = sdscat(info, "\r\n");

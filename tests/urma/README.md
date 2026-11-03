@@ -94,6 +94,15 @@ SDK 的同步 import/bind/delete、异步错误确认及 DMA 终止保证仍需 
 
 ## 本地软件验证
 
+可从已有 TCP 管理监听执行 `INFO urma`（`INFO all` 也包含该节）。
+`urma_compiled` 与 `urma_listener_enabled` 分别表示构建能力和监听配置；
+`urma_transports` 包括等待删除的 owner，`urma_retired_transports` 给出退役队列数。
+`urma_buffer_used` 是含保守预留的应用缓冲准入费用，不是 RSS，也不包含驱动内存。
+`urma_tx_completions/tx_wire_bytes` 只在成功 SDK 完成后计数；RX 在校验通过后计数。
+wire 字节包括帧头和控制消息，不是 Value 大小或命令执行确认。
+`urma_ready_total`、重试、错误、初始化失败、预算拒绝与超时计数保留至 runtime
+销毁，不随 `CONFIG RESETSTAT` 清零。正常关闭不算传输错误；删除失败仍保留额度。
+
 `urma-progress-timeout` 是正整数毫秒，默认 10000，重启生效。它限制已接受发送的
 投递/完成等待和明确失败的 receive repost；重试不会续期，空闲 RX 或单纯等待
 对端信用不会因此断开。先处理本轮观测到的完成，再检查剩余期限。到期只锁存

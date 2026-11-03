@@ -5,10 +5,10 @@
  */
 #include "server.h"
 #include "connection.h"
+#include "urma_transport.h"
 
 #ifdef USE_URMA
 #include "connhelpers.h"
-#include "urma_transport.h"
 #include <sys/random.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -410,7 +410,12 @@ static void initUrma(void) {
 }
 static void cleanupUrma(void) {
     if (poll_timer != AE_ERR) aeDeleteTimeEvent(server.el, poll_timer);
-    if (runtime && !urmaRuntimeClose(runtime)) serverLog(LL_WARNING, "URMA resources retained: deletion/quiescence incomplete");
+    if (runtime) {
+        if (urmaRuntimeClose(runtime))
+            runtime = NULL;
+        else
+            serverLog(LL_WARNING, "URMA resources retained: deletion/quiescence incomplete");
+    }
     if (connections && !listLength(connections)) {
         listRelease(connections);
         connections = NULL;
@@ -491,3 +496,38 @@ int RegisterConnectionTypeUrma(void) {
     return C_ERR;
 }
 #endif /* USE_URMA */
+
+sds genUrmaInfoString(sds info) {
+    int compiled = 0;
+    urmaRuntimeStats stats = {0};
+#ifdef USE_URMA
+    compiled = 1;
+    if (runtime) urmaRuntimeGetStats(runtime, &stats);
+#endif
+    return sdscatprintf(info,
+                        "# URMA\r\n"
+                        "urma_compiled:%d\r\n"
+                        "urma_listener_enabled:%d\r\n"
+                        "urma_progress_timeout_ms:%d\r\n"
+                        "urma_buffer_used:%zu\r\n"
+                        "urma_buffer_limit:%llu\r\n"
+                        "urma_transports:%u\r\n"
+                        "urma_retired_transports:%u\r\n"
+                        "urma_ready_total:%llu\r\n"
+                        "urma_initialization_failures:%llu\r\n"
+                        "urma_budget_rejections:%llu\r\n"
+                        "urma_tx_completions:%llu\r\n"
+                        "urma_tx_wire_bytes:%llu\r\n"
+                        "urma_rx_frames:%llu\r\n"
+                        "urma_rx_wire_bytes:%llu\r\n"
+                        "urma_post_retries:%llu\r\n"
+                        "urma_errors:%llu\r\n"
+                        "urma_progress_timeouts:%llu\r\n",
+                        compiled, server.urma_port != 0, server.urma_progress_timeout,
+                        stats.buffer_used, server.urma_buffer_limit, stats.transports, stats.retired,
+                        (unsigned long long)stats.ready_total, (unsigned long long)stats.initialization_failures,
+                        (unsigned long long)stats.budget_rejections, (unsigned long long)stats.tx_completions,
+                        (unsigned long long)stats.tx_wire_bytes, (unsigned long long)stats.rx_frames,
+                        (unsigned long long)stats.rx_wire_bytes, (unsigned long long)stats.post_retries,
+                        (unsigned long long)stats.errors, (unsigned long long)stats.progress_timeouts);
+}
