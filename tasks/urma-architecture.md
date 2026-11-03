@@ -161,6 +161,16 @@ DATA 承载 RESP 字节片段，不按 Key 或命令分帧；控制类型包括 
 
 ## 事件、线程和销毁
 
+运行时已增加操作级单调时钟期限，默认 10000ms，可用不可变启动参数
+`urma-progress-timeout` 设置。接受 TX、等待发送完成及明确失败的 receive repost
+计时；重试不延长期限，普通空闲 RX 和对端信用等待不计时。Progress 先处理
+本轮已观测完成，再检查剩余操作，超时只锁存错误并沿原有退役/删除规则保留内存。
+
+`INFO urma` / `INFO all` 读取纯内存快照，不初始化或轮询设备。buffer_used 为
+保守准入费用；transports 包含待删除的 owner，retired_transports 单列退役数量。
+wire 字节含帧头和控制消息，TX 只在成功 SDK 完成后计数，不是命令执行确认。
+累计计数持续到 runtime 销毁，正常关闭不增加错误，删除失败仍保留费用。
+
 当前实现使用 1ms 定时轮询，每连接每轮最多 64 个完成；还没有实现硬件事件
 fd 的 ack/rearm，下面相关流程仍是后续目标。引导 socket 等待有 5 秒期限；
 同步 SDK import/bind/delete 不会被这个计时器打断，其时间上界须在内网核验。
