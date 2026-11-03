@@ -31,6 +31,8 @@ static unsigned int next_id, allocations, attempts, fail_at;
 static int block_send, fail_delete, fail_bind, fail_completion, ambiguous_send,
     native_ub = 1;
 static int block_receive, suppress_completion, fake_clock, clock_failure;
+static int fail_receive;
+static unsigned int send_attempts;
 static uint64_t clock_ms;
 
 static void *allocate(size_t size) {
@@ -161,6 +163,8 @@ urma_status_t urma_unbind_jetty(urma_jetty_t *) { return URMA_SUCCESS; }
 urma_status_t urma_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr,
                                urma_jfr_wr_t **bad) {
   TestReceive *test = (TestReceive *)jfr;
+  if (fail_receive)
+    return URMA_EINVAL;
   if (block_receive || test->tail - test->head == 32) {
     *bad = wr;
     return URMA_EAGAIN;
@@ -171,6 +175,7 @@ urma_status_t urma_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr,
 }
 urma_status_t urma_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr,
                                       urma_jfs_wr_t **bad) {
+  send_attempts++;
   if (ambiguous_send)
     return URMA_EAGAIN;
   if (block_send) {
@@ -511,6 +516,34 @@ TEST(UrmaTransportTest, StatisticsSeparateWireCompletionFromRetainedOwners) {
   EXPECT_EQ(stats.ready_total, 1u);
   EXPECT_EQ(stats.tx_completions, 1u);
   EXPECT_EQ(stats.errors, 0u);
+  EXPECT_EQ(urmaRuntimeClose(runtime), 1);
+  EXPECT_EQ(allocations, 0u);
+}
+
+TEST(UrmaTransportTest, ReceiveRepostFailureStopsFurtherSubmissions) {
+  char error[URMA_ERROR_SIZE];
+  urmaRuntime *runtime = urmaRuntimeOpen("test", 0, 1024 * 1024, error);
+  ASSERT_TRUE(runtime != NULL);
+  urmaHello hello = {0, 0, 4, 2};
+  urmaTransport *transport = urmaTransportCreate(runtime, 42, &hello, error);
+  ASSERT_TRUE(transport != NULL);
+  unsigned char endpoint[URMA_ENDPOINT_SIZE];
+  urmaTransportEndpoint(transport, endpoint);
+  EXPECT_EQ(urmaTransportConnect(transport, endpoint, &hello), 0);
+  EXPECT_EQ(urmaTransportWrite(transport, "a", 1).bytes, 1u);
+  EXPECT_GE(urmaTransportProgress(transport, 16), 0);
+  block_send = 1;
+  EXPECT_EQ(urmaTransportWrite(transport, "b", 1).bytes, 1u);
+  block_send = 0;
+  unsigned int before = send_attempts;
+  fail_receive = 1;
+  char output;
+  EXPECT_EQ(urmaTransportRead(transport, &output, 1).bytes, 1u);
+  EXPECT_EQ(output, 'a');
+  EXPECT_EQ(send_attempts, before);
+  EXPECT_EQ(urmaTransportRead(transport, &output, 1).status, URMA_IO_ERROR);
+  fail_receive = 0;
+  EXPECT_EQ(urmaTransportDestroy(transport), 1);
   EXPECT_EQ(urmaRuntimeClose(runtime), 1);
   EXPECT_EQ(allocations, 0u);
 }

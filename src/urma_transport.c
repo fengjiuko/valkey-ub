@@ -581,8 +581,12 @@ urmaIoResult urmaTransportRead(urmaTransport *transport, void *data, size_t leng
     if (!owned(transport->runtime) || !transport->connected || transport->failed) return (urmaIoResult){URMA_IO_ERROR, 0};
     if (!length) return (urmaIoResult){URMA_IO_OK, 0};
     urmaIoResult result = urmaSessionRead(transport->session, data, length);
-    replenish(transport);
-    submitPending(transport);
+    if (result.status == URMA_IO_ERROR) return result;
+    if (replenish(transport) < 0 || submitPending(transport) < 0) {
+        /* Preserve bytes already delivered, but never submit after a failed
+         * repost. The next call reports the latched transport failure. */
+        if (!result.bytes) return (urmaIoResult){URMA_IO_ERROR, 0};
+    }
     return result;
 }
 
