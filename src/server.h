@@ -2522,6 +2522,7 @@ struct valkeyServer {
     serverRdmaContextConfig rdma_ctx_config;
     int urma_port;
     int urma_eid_index;
+    int urma_progress_timeout;
     int urma_allow_insecure_bootstrap;
     char *urma_device;
     unsigned long long urma_buffer_limit;

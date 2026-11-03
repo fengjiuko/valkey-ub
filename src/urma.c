@@ -361,6 +361,10 @@ static int listenUrma(connListener *listener) {
         serverLog(LL_WARNING, "URMA: %s", error);
         return C_ERR;
     }
+    if (!urmaRuntimeSetProgressTimeout(runtime, server.urma_progress_timeout)) {
+        serverLog(LL_WARNING, "Cannot configure URMA progress timeout");
+        return C_ERR;
+    }
     if (listenToPort(listener) == C_ERR) return C_ERR;
     poll_timer = aeCreateTimeEvent(server.el, 1, pollTick, NULL, NULL);
     if (poll_timer == AE_ERR) return C_ERR;

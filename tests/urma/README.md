@@ -58,6 +58,7 @@ urma-port 6380
 urma-device <盘点得到的原生UB设备名>
 urma-eid-index <盘点得到的索引>
 urma-buffer-limit 64mb
+urma-progress-timeout 10000
 urma-allow-insecure-bootstrap yes
 io-threads 1
 save ""
@@ -92,6 +93,11 @@ SDK 的同步 import/bind/delete、异步错误确认及 DMA 终止保证仍需 
 没有完成这些验证前，不能把本实验分支用于生产或宣布 U1/U4/U5 硬件验收完成。
 
 ## 本地软件验证
+
+`urma-progress-timeout` 是正整数毫秒，默认 10000，重启生效。它限制已接受发送的
+投递/完成等待和明确失败的 receive repost；重试不会续期，空闲 RX 或单纯等待
+对端信用不会因此断开。先处理本轮观测到的完成，再检查剩余期限。到期只锁存
+逻辑错误，仍保留设备可能引用的内存；也不能打断同步 SDK 调用或证明 DMA 停止。
 
 ```sh
 make -C src test-unit MALLOC=libc BUILD_URMA=yes UNIT_TEST_PATTERN=Urma
