@@ -2781,6 +2781,10 @@ static int updateWatchdogPeriod(const char **err) {
 }
 
 static int updateAppendOnly(const char **err) {
+    if (server.urma_port && server.aof_enabled) {
+        *err = "AOF is not qualified with the experimental URMA listener";
+        return 0;
+    }
     if (!server.aof_enabled && server.aof_state != AOF_OFF) {
         stopAppendOnly();
     } else if (server.aof_enabled && server.aof_state == AOF_OFF) {
@@ -3032,6 +3036,11 @@ static sds getConfigDirOption(standardConfig *config) {
 static int setConfigSaveOption(standardConfig *config, sds *argv, int argc, const char **err) {
     UNUSED(config);
     int j;
+
+    if (!reading_config_file && server.urma_port && !(argc == 1 && !argv[0][0])) {
+        *err = "Background snapshots are not qualified with the experimental URMA listener";
+        return 0;
+    }
 
     /* Special case: treat single arg "" as zero args indicating empty save configuration */
     if (argc == 1 && !strcasecmp(argv[0], "")) {

@@ -7559,6 +7559,11 @@ void closeChildUnusedResourceAfterFork(void) {
 
 /* purpose is one of CHILD_TYPE_ types */
 int serverFork(int purpose) {
+    if (server.urma_port) {
+        serverLog(LL_WARNING, "Background fork is unavailable while the experimental URMA listener is enabled");
+        errno = ENOTSUP;
+        return -1;
+    }
     if (isMutuallyExclusiveChildType(purpose)) {
         if (hasActiveSaveOrChild()) {
             errno = EALREADY;
