@@ -26,7 +26,7 @@ $(OUT)/client-probe: client_probe.c $(OBJECTS)
 # This runner substitutes SDK calls at the SDK seam. It is never linked into
 # server/probe binaries and does not establish hardware compatibility.
 $(OUT)/transport-tests: test_transport.cpp $(OBJECTS)
-	$(CXX) -std=c++17 -Wall -Wextra -Werror -I../../src $(URMA_CFLAGS) $(SANITIZER_FLAGS) $^ -Wl,--gc-sections -lgtest_main -lgtest -pthread -o $@
+	$(CXX) -std=c++17 -Wall -Wextra -Werror -I../../src $(URMA_CFLAGS) $(SANITIZER_FLAGS) $^ -Wl,--gc-sections -Wl,--wrap=clock_gettime -lgtest_main -lgtest -pthread -o $@
 
 test: $(OUT)/transport-tests
 	$(OUT)/transport-tests

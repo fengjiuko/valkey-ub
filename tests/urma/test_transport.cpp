@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <urma_api.h>
 extern "C" {
 #include "urma_transport.h"
@@ -29,6 +30,8 @@ static urma_jetty_t *jetties[32];
 static unsigned int next_id, allocations, attempts, fail_at;
 static int block_send, fail_delete, fail_bind, fail_completion, ambiguous_send,
     native_ub = 1;
+static int block_receive, suppress_completion, fake_clock, clock_failure;
+static uint64_t clock_ms;
 
 static void *allocate(size_t size) {
   if (++attempts == fail_at)
@@ -50,6 +53,18 @@ static void queueCompletion(urma_jfc_t *jfc, const urma_cr_t *completion) {
   test->queue[test->tail++ % 128] = *completion;
 }
 extern "C" {
+int __real_clock_gettime(clockid_t, struct timespec *);
+int __wrap_clock_gettime(clockid_t id, struct timespec *out) {
+  if (!fake_clock || id != CLOCK_MONOTONIC)
+    return __real_clock_gettime(id, out);
+  if (clock_failure) {
+    errno = EIO;
+    return -1;
+  }
+  out->tv_sec = clock_ms / 1000;
+  out->tv_nsec = (clock_ms % 1000) * 1000000;
+  return 0;
+}
 urma_status_t urma_init(urma_init_attr_t *) { return URMA_SUCCESS; }
 urma_status_t urma_uninit(void) { return URMA_SUCCESS; }
 urma_device_t *urma_get_device_by_name(char *) {
@@ -146,7 +161,7 @@ urma_status_t urma_unbind_jetty(urma_jetty_t *) { return URMA_SUCCESS; }
 urma_status_t urma_post_jfr_wr(urma_jfr_t *jfr, urma_jfr_wr_t *wr,
                                urma_jfr_wr_t **bad) {
   TestReceive *test = (TestReceive *)jfr;
-  if (test->tail - test->head == 32) {
+  if (block_receive || test->tail - test->head == 32) {
     *bad = wr;
     return URMA_EAGAIN;
   }
@@ -186,7 +201,8 @@ urma_status_t urma_post_jetty_send_wr(urma_jetty_t *jetty, urma_jfs_wr_t *wr,
   if (fail_completion)
     tx.status = URMA_CR_WR_FLUSH_ERR;
   tx.user_ctx = wr->user_ctx;
-  queueCompletion(jetty->jetty_cfg.jfs_cfg.jfc, &tx);
+  if (!suppress_completion)
+    queueCompletion(jetty->jetty_cfg.jfs_cfg.jfc, &tx);
   return URMA_SUCCESS;
 }
 int urma_poll_jfc(urma_jfc_t *jfc, int count, urma_cr_t *out) {
@@ -305,6 +321,145 @@ TEST(UrmaTransportTest, AmbiguousSubmissionIsNotRetried) {
   EXPECT_EQ(urmaTransportDestroy(transport), 1);
   EXPECT_EQ(urmaRuntimeClose(runtime), 1);
   EXPECT_EQ(allocations, 0u);
+}
+
+static urmaTransport *connectSelf(urmaRuntime *runtime) {
+  char error[URMA_ERROR_SIZE];
+  urmaHello hello = {0, 0, 4, 1};
+  urmaTransport *transport = urmaTransportCreate(runtime, 42, &hello, error);
+  if (!transport)
+    return NULL;
+  unsigned char endpoint[URMA_ENDPOINT_SIZE];
+  urmaTransportEndpoint(transport, endpoint);
+  EXPECT_EQ(urmaTransportConnect(transport, endpoint, &hello), 0);
+  return transport;
+}
+
+TEST(UrmaTransportTest,
+     QueuedSendDeadlineDoesNotRenewOnRetryOrReleaseDmaStorage) {
+  char error[URMA_ERROR_SIZE];
+  fake_clock = 1;
+  clock_ms = 1000;
+  urmaRuntime *runtime = urmaRuntimeOpen("test", 0, 1024 * 1024, error);
+  ASSERT_TRUE(runtime != NULL);
+  EXPECT_EQ(urmaRuntimeSetProgressTimeout(runtime, 0), 0);
+  EXPECT_EQ(urmaRuntimeSetProgressTimeout(runtime, UINT32_MAX), 0);
+  EXPECT_EQ(urmaRuntimeSetProgressTimeout(runtime, 10), 1);
+  urmaTransport *transport = connectSelf(runtime);
+  ASSERT_TRUE(transport != NULL);
+  EXPECT_EQ(urmaRuntimeSetProgressTimeout(runtime, 20), 0);
+  size_t charge = urmaRuntimeMemory(runtime);
+  block_send = 1;
+  EXPECT_EQ(urmaTransportWrite(transport, "x", 1).bytes, 1u);
+  clock_ms += 9;
+  EXPECT_GE(urmaTransportProgress(transport, 16), 0);
+  clock_ms++;
+  EXPECT_EQ(urmaTransportProgress(transport, 16), -1);
+  EXPECT_TRUE(strstr(urmaTransportError(transport), "progress timeout") !=
+              NULL);
+  EXPECT_EQ(urmaRuntimeMemory(runtime), charge);
+  block_send = 0;
+  fail_delete = 1;
+  EXPECT_EQ(urmaTransportDestroy(transport), 0);
+  EXPECT_EQ(urmaRuntimeMemory(runtime), charge);
+  urmaTransportRetire(transport);
+  fail_delete = 0;
+  urmaRuntimeReap(runtime);
+  EXPECT_EQ(urmaRuntimeMemory(runtime), 0u);
+  EXPECT_EQ(urmaRuntimeClose(runtime), 1);
+  EXPECT_EQ(allocations, 0u);
+  fake_clock = 0;
+}
+
+TEST(UrmaTransportTest, MissingSendCompletionExpiresDespiteUnrelatedReceive) {
+  char error[URMA_ERROR_SIZE];
+  fake_clock = 1;
+  clock_ms = 1000;
+  urmaRuntime *runtime = urmaRuntimeOpen("test", 0, 1024 * 1024, error);
+  ASSERT_TRUE(runtime != NULL);
+  EXPECT_EQ(urmaRuntimeSetProgressTimeout(runtime, 10), 1);
+  urmaTransport *transport = connectSelf(runtime);
+  ASSERT_TRUE(transport != NULL);
+  suppress_completion = 1;
+  EXPECT_EQ(urmaTransportWrite(transport, "x", 1).bytes, 1u);
+  clock_ms += 10;
+  EXPECT_EQ(urmaTransportProgress(transport, 16), -1);
+  EXPECT_EQ(urmaTransportWrite(transport, "y", 1).status, URMA_IO_ERROR);
+  suppress_completion = 0;
+  EXPECT_EQ(urmaTransportDestroy(transport), 1);
+  EXPECT_EQ(urmaRuntimeClose(runtime), 1);
+  EXPECT_EQ(allocations, 0u);
+  fake_clock = 0;
+}
+
+TEST(UrmaTransportTest, ObservedCompletionAndIdleCreditWaitDoNotExpire) {
+  char error[URMA_ERROR_SIZE];
+  fake_clock = 1;
+  clock_ms = 1000;
+  urmaRuntime *runtime = urmaRuntimeOpen("test", 0, 1024 * 1024, error);
+  ASSERT_TRUE(runtime != NULL);
+  EXPECT_EQ(urmaRuntimeSetProgressTimeout(runtime, 10), 1);
+  urmaTransport *transport = connectSelf(runtime);
+  ASSERT_TRUE(transport != NULL);
+  EXPECT_EQ(urmaTransportWrite(transport, "xy", 2).bytes, 2u);
+  clock_ms += 100;
+  EXPECT_GE(urmaTransportProgress(transport, 16), 0);
+  EXPECT_EQ(urmaTransportWritable(transport), 0);
+  clock_ms += 10000;
+  EXPECT_GE(urmaTransportProgress(transport, 16), 0);
+  char output[2];
+  EXPECT_EQ(urmaTransportRead(transport, output, sizeof(output)).bytes, 2u);
+  EXPECT_EQ(memcmp(output, "xy", 2), 0);
+  clock_ms += 100;
+  EXPECT_GE(urmaTransportProgress(transport, 16), 0);
+  EXPECT_EQ(urmaTransportWritable(transport), 1);
+  EXPECT_EQ(urmaTransportDestroy(transport), 1);
+  EXPECT_EQ(urmaRuntimeClose(runtime), 1);
+  EXPECT_EQ(allocations, 0u);
+  fake_clock = 0;
+}
+
+TEST(UrmaTransportTest, ReceiveRepostStallExpiresWithoutGrantingCredit) {
+  char error[URMA_ERROR_SIZE];
+  fake_clock = 1;
+  clock_ms = 1000;
+  urmaRuntime *runtime = urmaRuntimeOpen("test", 0, 1024 * 1024, error);
+  ASSERT_TRUE(runtime != NULL);
+  EXPECT_EQ(urmaRuntimeSetProgressTimeout(runtime, 10), 1);
+  urmaTransport *transport = connectSelf(runtime);
+  ASSERT_TRUE(transport != NULL);
+  EXPECT_EQ(urmaTransportWrite(transport, "x", 1).bytes, 1u);
+  EXPECT_GE(urmaTransportProgress(transport, 16), 0);
+  block_receive = 1;
+  char output;
+  EXPECT_EQ(urmaTransportRead(transport, &output, 1).bytes, 1u);
+  EXPECT_EQ(urmaTransportWritable(transport), 0);
+  clock_ms += 10;
+  EXPECT_EQ(urmaTransportProgress(transport, 16), -1);
+  block_receive = 0;
+  EXPECT_EQ(urmaTransportDestroy(transport), 1);
+  EXPECT_EQ(urmaRuntimeClose(runtime), 1);
+  EXPECT_EQ(allocations, 0u);
+  fake_clock = 0;
+}
+
+TEST(UrmaTransportTest, ClockFailureAfterWriteAcceptanceStillAllowsCleanup) {
+  char error[URMA_ERROR_SIZE];
+  fake_clock = 1;
+  clock_ms = 1000;
+  urmaRuntime *runtime = urmaRuntimeOpen("test", 0, 1024 * 1024, error);
+  ASSERT_TRUE(runtime != NULL);
+  urmaTransport *transport = connectSelf(runtime);
+  ASSERT_TRUE(transport != NULL);
+  clock_failure = 1;
+  EXPECT_EQ(urmaTransportWrite(transport, "x", 1).bytes, 1u);
+  clock_failure = 0;
+  EXPECT_EQ(urmaTransportProgress(transport, 16), -1);
+  EXPECT_TRUE(strstr(urmaTransportError(transport), "clock_gettime") != NULL);
+  EXPECT_EQ(urmaTransportDestroy(transport), 1);
+  EXPECT_EQ(urmaRuntimeClose(runtime), 1);
+  EXPECT_EQ(allocations, 0u);
+  fake_clock = 0;
 }
 
 TEST(UrmaTransportTest, RetryCreditAndClosePreserveByteStream) {

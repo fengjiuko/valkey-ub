@@ -10,6 +10,7 @@
 
 #define URMA_ENDPOINT_SIZE 64
 #define URMA_ERROR_SIZE 192
+#define URMA_DEFAULT_PROGRESS_TIMEOUT 10000
 
 typedef struct urmaRuntime urmaRuntime;
 typedef struct urmaTransport urmaTransport;
@@ -20,6 +21,10 @@ typedef struct urmaTransport urmaTransport;
 urmaRuntime *urmaRuntimeOpen(const char *device, uint32_t eid_index, size_t budget, char *error);
 int urmaRuntimeClose(urmaRuntime *runtime);
 size_t urmaRuntimeMemory(const urmaRuntime *runtime);
+/* Set before creating transports. Positive milliseconds, at most INT_MAX.
+ * Deadlines cover accepted TX and receive-repost stalls, not idle RX or a
+ * peer withholding credit. Expiry never establishes that DMA has stopped. */
+int urmaRuntimeSetProgressTimeout(urmaRuntime *runtime, unsigned int milliseconds);
 void urmaRuntimeReap(urmaRuntime *runtime);
 
 /* Creation reserves memory before registering/posting and exports two RC

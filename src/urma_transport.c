@@ -9,11 +9,13 @@
 #include "zmalloc.h"
 #include <urma_api.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/random.h>
+#include <time.h>
 #include <unistd.h>
 
 typedef struct {
@@ -21,6 +23,7 @@ typedef struct {
     uint64_t cookie;
     uint64_t operation;
     uint64_t ticket;
+    uint64_t deadline;
     uint32_t length;
     bool posted;
 } urmaBuffer;
@@ -30,6 +33,7 @@ struct urmaRuntime {
     urma_device_attr_t attributes;
     size_t budget, used;
     unsigned int transports;
+    unsigned int progress_timeout;
     pid_t owner;
     urmaTransport *retired;
 };
@@ -111,6 +115,7 @@ urmaRuntime *urmaRuntimeOpen(const char *device, uint32_t eid_index, size_t budg
         goto invalid;
     }
     runtime->budget = budget;
+    runtime->progress_timeout = URMA_DEFAULT_PROGRESS_TIMEOUT;
     runtime->owner = getpid();
     initialized = true;
     return runtime;
@@ -122,6 +127,47 @@ invalid:
 
 size_t urmaRuntimeMemory(const urmaRuntime *runtime) {
     return runtime->used;
+}
+
+int urmaRuntimeSetProgressTimeout(urmaRuntime *runtime, unsigned int milliseconds) {
+    if (!owned(runtime) || runtime->transports || !milliseconds || milliseconds > INT_MAX) return 0;
+    runtime->progress_timeout = milliseconds;
+    return 1;
+}
+
+static int monotonicMilliseconds(urmaTransport *transport, uint64_t *result) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return failTransport(transport, "clock_gettime", errno);
+    uint64_t fraction = now.tv_nsec / 1000000;
+    if (now.tv_sec < 0 || (uint64_t)now.tv_sec > (UINT64_MAX - fraction) / 1000)
+        return failTransport(transport, "Monotonic clock overflow", EOVERFLOW);
+    *result = (uint64_t)now.tv_sec * 1000 + fraction;
+    return 0;
+}
+
+static int startDeadline(urmaTransport *transport, urmaBuffer *buffer) {
+    uint64_t now;
+    if (monotonicMilliseconds(transport, &now) < 0) return -1;
+    if (!buffer->deadline) {
+        if (now > UINT64_MAX - transport->runtime->progress_timeout)
+            return failTransport(transport, "Progress deadline overflow", EOVERFLOW);
+        buffer->deadline = now + transport->runtime->progress_timeout;
+    }
+    if (now >= buffer->deadline) return failTransport(transport, "URMA progress timeout", ETIMEDOUT);
+    return 0;
+}
+
+static int checkDeadlines(urmaTransport *transport) {
+    uint64_t now = 0;
+    bool have_time = false;
+    for (uint32_t i = 0; i < 2 * transport->count + 3; i++) {
+        urmaBuffer *buffer = &transport->tx[i];
+        if (!buffer->deadline) continue;
+        if (!have_time && monotonicMilliseconds(transport, &now) < 0) return -1;
+        have_time = true;
+        if (now >= buffer->deadline) return failTransport(transport, "URMA progress timeout", ETIMEDOUT);
+    }
+    return 0;
 }
 
 void urmaRuntimeReap(urmaRuntime *runtime) {
@@ -161,6 +207,7 @@ static uint64_t newCookie(urmaTransport *transport) {
 }
 
 static int postReceive(urmaTransport *transport, urmaBuffer *buffer, int channel) {
+    if (buffer->deadline && startDeadline(transport, buffer) < 0) return -1;
     uint64_t cookie = newCookie(transport);
     if (!cookie) return -1;
     urma_sge_t sge = {.addr = (uintptr_t)buffer->data,
@@ -171,14 +218,17 @@ static int postReceive(urmaTransport *transport, urmaBuffer *buffer, int channel
     urma_status_t status = urma_post_jfr_wr(transport->receive[channel], &wr, &bad);
     /* Retry only when the SDK identifies this single WR as not accepted.
      * Ambiguous failures retain storage until endpoint destruction. */
-    if ((status == URMA_EAGAIN || status == URMA_ENOMEM) && bad == &wr) return 0;
+    if ((status == URMA_EAGAIN || status == URMA_ENOMEM) && bad == &wr)
+        return startDeadline(transport, buffer) < 0 ? -1 : 0;
     if (status != URMA_SUCCESS) return failTransport(transport, "urma_post_jfr_wr", status);
     buffer->cookie = cookie;
     buffer->posted = true;
+    buffer->deadline = 0;
     return 1;
 }
 
 static int postSend(urmaTransport *transport, urmaBuffer *buffer, int channel) {
+    if (startDeadline(transport, buffer) < 0) return -1;
     uint64_t cookie = newCookie(transport);
     if (!cookie) return -1;
     urma_sge_t sge = {.addr = (uintptr_t)buffer->data, .len = buffer->length, .tseg = transport->segment};
@@ -387,6 +437,7 @@ static int sendCompletion(urmaTransport *transport, const urma_cr_t *completion)
     if (!buffer) return failTransport(transport, "Unknown TX completion", EPROTO);
     buffer->posted = false;
     buffer->length = 0;
+    buffer->deadline = 0;
     if (buffer->operation) {
         if (!urmaSessionComplete(transport->session, transport->epoch, buffer->operation, 1))
             return failTransport(transport, "Stale TX operation", EPROTO);
@@ -466,7 +517,9 @@ int urmaTransportProgress(urmaTransport *transport, unsigned int budget) {
         }
         processed += polled;
     }
-    if (replenish(transport) < 0 || submitPending(transport) < 0) return -1;
+    /* Drain observed completions before expiring the operations they finish.
+     * Retries and unrelated traffic never extend an individual deadline. */
+    if (checkDeadlines(transport) < 0 || replenish(transport) < 0 || submitPending(transport) < 0) return -1;
     return processed;
 }
 
@@ -484,13 +537,14 @@ urmaIoResult urmaTransportWrite(urmaTransport *transport, const void *data, size
     uint64_t operation;
     urmaIoResult result = urmaSessionWrite(transport->session, data, length, &frame, &operation);
     if (result.status != URMA_IO_OK) return result;
+    buffer->operation = operation;
     size_t encoded;
     if (urmaEncodeFrame(buffer->data, transport->stride, &frame, transport->local.max_payload, &encoded) != URMA_PROTOCOL_OK) {
         failTransport(transport, "Encode DATA", EPROTO);
         return result;
     }
     buffer->length = encoded;
-    buffer->operation = operation;
+    if (startDeadline(transport, buffer) < 0) return result;
     /* Any submission error is latched; the accepted prefix remains consumed. */
     submitPending(transport);
     return result;
