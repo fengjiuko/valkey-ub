@@ -43,6 +43,22 @@ static void urmaSessionUpdateClosed(urmaSession *session) {
         session->state = URMA_SESSION_CLOSED;
 }
 
+size_t urmaSessionAllocationSize(const urmaHello *local) {
+    urmaNegotiated negotiated;
+    if (urmaNegotiateHello(local, local, &negotiated) != URMA_PROTOCOL_OK) return 0;
+    return sizeof(urmaSession) + 2 * local->receive_slots *
+                                     (sizeof(urmaSessionSlot) + (size_t)local->max_payload);
+}
+
+int urmaSessionReadable(const urmaSession *session) {
+    return session->rx_consumed != session->rx_frames || session->peer_closed || session->state == URMA_SESSION_FAILED;
+}
+
+int urmaSessionWritable(const urmaSession *session) {
+    return session->state == URMA_SESSION_READY && session->tx_pending < session->slots &&
+           session->tx_frames < session->tx_credit;
+}
+
 urmaSession *urmaSessionCreate(uint64_t session_id, const urmaHello *local, const urmaHello *peer) {
     urmaNegotiated negotiated;
     if (!session_id || urmaNegotiateHello(local, peer, &negotiated) != URMA_PROTOCOL_OK) return NULL;

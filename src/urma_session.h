@@ -35,6 +35,11 @@ typedef struct {
  * Creation is fallible and uses the negotiated payload and local slot count.
  * The future runtime must apply its global memory budget before creation. */
 urmaSession *urmaSessionCreate(uint64_t session_id, const urmaHello *local, const urmaHello *peer);
+/* Conservative admission charge for a local configuration, including metadata.
+ * Returns zero for invalid limits. No allocation or SDK access is performed. */
+size_t urmaSessionAllocationSize(const urmaHello *local);
+int urmaSessionReadable(const urmaSession *session);
+int urmaSessionWritable(const urmaSession *session);
 
 /* Stop all backend deliveries and quiesce hardware before freeing. Returns 0
  * while TX frames are borrowed; the session and buffers then remain alive. */

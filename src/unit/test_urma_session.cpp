@@ -24,6 +24,33 @@ static urmaProtocolResult deliverFrame(urmaSession *session, const urmaFrame *fr
     return urmaSessionReceive(session, wire, written);
 }
 
+TEST(UrmaSessionTest, AdmissionAndReadinessTrackCreditAndBufferedData) {
+    urmaHello hello = {0, 0, 4, 1};
+    EXPECT_GT(urmaSessionAllocationSize(&hello), 8u);
+    hello.receive_slots = 0;
+    EXPECT_EQ(urmaSessionAllocationSize(&hello), 0u);
+    EXPECT_EQ(urmaSessionAllocationSize(NULL), 0u);
+    urmaSession *session = createSession(4, 1, 1);
+    ASSERT_TRUE(session != NULL);
+    EXPECT_EQ(urmaSessionReadable(session), 0);
+    EXPECT_EQ(urmaSessionWritable(session), 1);
+    urmaFrame frame;
+    uint64_t operation;
+    EXPECT_EQ(urmaSessionWrite(session, "x", 1, &frame, &operation).status, URMA_IO_OK);
+    EXPECT_EQ(urmaSessionWritable(session), 0);
+    EXPECT_EQ(deliverFrame(session, &frame), URMA_PROTOCOL_OK);
+    EXPECT_EQ(urmaSessionReadable(session), 1);
+    char output;
+    EXPECT_EQ(urmaSessionRead(session, &output, 1).bytes, 1u);
+    EXPECT_EQ(urmaSessionReadable(session), 0);
+    EXPECT_EQ(urmaSessionComplete(session, 42, operation, 1), 1);
+    EXPECT_EQ(urmaSessionWritable(session), 0);
+    urmaSessionFail(session);
+    EXPECT_EQ(urmaSessionReadable(session), 1);
+    EXPECT_EQ(urmaSessionWritable(session), 0);
+    EXPECT_EQ(urmaSessionFree(session), 1);
+}
+
 /* Helpers use EXPECT so callers always reach explicit cleanup. */
 static uint64_t writeFrame(urmaSession *session, const char *data, size_t length, urmaFrame *frame, size_t expected) {
     uint64_t operation = 0;
