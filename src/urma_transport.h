@@ -15,12 +15,24 @@
 typedef struct urmaRuntime urmaRuntime;
 typedef struct urmaTransport urmaTransport;
 
+/* Runtime-lifetime counters. Wire bytes include framing/control messages;
+ * successful local TX completion is not acknowledgement of command execution.
+ * Gauges include owners retained after a failed resource deletion. */
+typedef struct {
+    size_t buffer_used, buffer_limit;
+    unsigned int transports, retired;
+    uint64_t ready_total, initialization_failures, budget_rejections;
+    uint64_t tx_completions, tx_wire_bytes, rx_frames, rx_wire_bytes;
+    uint64_t post_retries, errors, progress_timeouts;
+} urmaRuntimeStats;
+
 /* One runtime per process, owned by its creating thread. No calls in fork
  * children. The budget bounds application buffers, not driver/kernel memory.
  * Device must advertise native UB, RC, RTP and target ordering; no fallback. */
 urmaRuntime *urmaRuntimeOpen(const char *device, uint32_t eid_index, size_t budget, char *error);
 int urmaRuntimeClose(urmaRuntime *runtime);
 size_t urmaRuntimeMemory(const urmaRuntime *runtime);
+void urmaRuntimeGetStats(const urmaRuntime *runtime, urmaRuntimeStats *stats);
 /* Set before creating transports. Positive milliseconds, at most INT_MAX.
  * Deadlines cover accepted TX and receive-repost stalls, not idle RX or a
  * peer withholding credit. Expiry never establishes that DMA has stopped. */

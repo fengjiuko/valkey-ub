@@ -357,6 +357,11 @@ TEST(UrmaTransportTest,
   EXPECT_EQ(urmaTransportProgress(transport, 16), -1);
   EXPECT_TRUE(strstr(urmaTransportError(transport), "progress timeout") !=
               NULL);
+  EXPECT_EQ(urmaTransportProgress(transport, 16), -1);
+  urmaRuntimeStats stats;
+  urmaRuntimeGetStats(runtime, &stats);
+  EXPECT_EQ(stats.errors, 1u);
+  EXPECT_EQ(stats.progress_timeouts, 1u);
   EXPECT_EQ(urmaRuntimeMemory(runtime), charge);
   block_send = 0;
   fail_delete = 1;
@@ -460,6 +465,54 @@ TEST(UrmaTransportTest, ClockFailureAfterWriteAcceptanceStillAllowsCleanup) {
   EXPECT_EQ(urmaRuntimeClose(runtime), 1);
   EXPECT_EQ(allocations, 0u);
   fake_clock = 0;
+}
+
+TEST(UrmaTransportTest, StatisticsSeparateWireCompletionFromRetainedOwners) {
+  char error[URMA_ERROR_SIZE];
+  urmaRuntime *runtime = urmaRuntimeOpen("test", 0, 1024 * 1024, error);
+  ASSERT_TRUE(runtime != NULL);
+  urmaTransport *transport = connectSelf(runtime);
+  ASSERT_TRUE(transport != NULL);
+  urmaRuntimeStats stats;
+  urmaRuntimeGetStats(runtime, &stats);
+  EXPECT_EQ(stats.transports, 1u);
+  EXPECT_EQ(stats.ready_total, 1u);
+  EXPECT_EQ(stats.retired, 0u);
+  EXPECT_EQ(stats.buffer_limit, 1024u * 1024u);
+  EXPECT_GT(stats.buffer_used, 0u);
+  size_t charge = stats.buffer_used;
+  EXPECT_EQ(urmaTransportWrite(transport, "abc", 3).bytes, 3u);
+  urmaRuntimeGetStats(runtime, &stats);
+  EXPECT_EQ(stats.tx_completions, 0u);
+  EXPECT_GE(urmaTransportProgress(transport, 16), 0);
+  urmaRuntimeGetStats(runtime, &stats);
+  EXPECT_EQ(stats.tx_completions, 1u);
+  EXPECT_EQ(stats.tx_wire_bytes, URMA_PROTOCOL_HEADER_SIZE + 3u);
+  EXPECT_EQ(stats.rx_frames, 1u);
+  EXPECT_EQ(stats.rx_wire_bytes, URMA_PROTOCOL_HEADER_SIZE + 3u);
+  urmaHello too_large = {0, 0, URMA_PROTOCOL_MAX_PAYLOAD,
+                         URMA_PROTOCOL_MAX_SLOTS};
+  EXPECT_TRUE(urmaTransportCreate(runtime, 43, &too_large, error) == NULL);
+  urmaRuntimeGetStats(runtime, &stats);
+  EXPECT_EQ(stats.budget_rejections, 1u);
+  fail_delete = 1;
+  urmaTransportRetire(transport);
+  urmaRuntimeGetStats(runtime, &stats);
+  EXPECT_EQ(stats.transports, 1u);
+  EXPECT_EQ(stats.retired, 1u);
+  EXPECT_EQ(stats.buffer_used, charge);
+  EXPECT_EQ(stats.errors, 0u);
+  fail_delete = 0;
+  urmaRuntimeReap(runtime);
+  urmaRuntimeGetStats(runtime, &stats);
+  EXPECT_EQ(stats.transports, 0u);
+  EXPECT_EQ(stats.retired, 0u);
+  EXPECT_EQ(stats.buffer_used, 0u);
+  EXPECT_EQ(stats.ready_total, 1u);
+  EXPECT_EQ(stats.tx_completions, 1u);
+  EXPECT_EQ(stats.errors, 0u);
+  EXPECT_EQ(urmaRuntimeClose(runtime), 1);
+  EXPECT_EQ(allocations, 0u);
 }
 
 TEST(UrmaTransportTest, RetryCreditAndClosePreserveByteStream) {

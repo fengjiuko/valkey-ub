@@ -34,6 +34,8 @@ struct urmaRuntime {
     size_t budget, used;
     unsigned int transports;
     unsigned int progress_timeout;
+    unsigned int retired_count;
+    urmaRuntimeStats stats;
     pid_t owner;
     urmaTransport *retired;
 };
@@ -71,7 +73,11 @@ static void setError(char *error, const char *format, ...) {
 }
 
 static int failTransport(urmaTransport *transport, const char *operation, int status) {
-    if (!transport->failed) setError(transport->error, "%s failed (status=%d)", operation, status);
+    if (!transport->failed) {
+        setError(transport->error, "%s failed (status=%d)", operation, status);
+        transport->runtime->stats.errors++;
+        if (status == ETIMEDOUT) transport->runtime->stats.progress_timeouts++;
+    }
     transport->failed = true;
     if (transport->session) urmaSessionFail(transport->session);
     return -1;
@@ -129,6 +135,14 @@ size_t urmaRuntimeMemory(const urmaRuntime *runtime) {
     return runtime->used;
 }
 
+void urmaRuntimeGetStats(const urmaRuntime *runtime, urmaRuntimeStats *stats) {
+    *stats = runtime->stats;
+    stats->buffer_used = runtime->used;
+    stats->buffer_limit = runtime->budget;
+    stats->transports = runtime->transports;
+    stats->retired = runtime->retired_count;
+}
+
 int urmaRuntimeSetProgressTimeout(urmaRuntime *runtime, unsigned int milliseconds) {
     if (!owned(runtime) || runtime->transports || !milliseconds || milliseconds > INT_MAX) return 0;
     runtime->progress_timeout = milliseconds;
@@ -176,9 +190,10 @@ void urmaRuntimeReap(urmaRuntime *runtime) {
     while (*link) {
         urmaTransport *transport = *link;
         urmaTransport *next = transport->next;
-        if (urmaTransportDestroy(transport))
+        if (urmaTransportDestroy(transport)) {
             *link = next;
-        else
+            runtime->retired_count--;
+        } else
             link = &transport->next;
     }
 }
@@ -218,8 +233,10 @@ static int postReceive(urmaTransport *transport, urmaBuffer *buffer, int channel
     urma_status_t status = urma_post_jfr_wr(transport->receive[channel], &wr, &bad);
     /* Retry only when the SDK identifies this single WR as not accepted.
      * Ambiguous failures retain storage until endpoint destruction. */
-    if ((status == URMA_EAGAIN || status == URMA_ENOMEM) && bad == &wr)
+    if ((status == URMA_EAGAIN || status == URMA_ENOMEM) && bad == &wr) {
+        transport->runtime->stats.post_retries++;
         return startDeadline(transport, buffer) < 0 ? -1 : 0;
+    }
     if (status != URMA_SUCCESS) return failTransport(transport, "urma_post_jfr_wr", status);
     buffer->cookie = cookie;
     buffer->posted = true;
@@ -239,7 +256,10 @@ static int postSend(urmaTransport *transport, urmaBuffer *buffer, int channel) {
     wr.send.src.num_sge = 1;
     urma_jfs_wr_t *bad = NULL;
     urma_status_t status = urma_post_jetty_send_wr(transport->jetty[channel], &wr, &bad);
-    if ((status == URMA_EAGAIN || status == URMA_ENOMEM) && bad == &wr) return 0;
+    if ((status == URMA_EAGAIN || status == URMA_ENOMEM) && bad == &wr) {
+        transport->runtime->stats.post_retries++;
+        return 0;
+    }
     if (status != URMA_SUCCESS) return failTransport(transport, "urma_post_jetty_send_wr", status);
     buffer->cookie = cookie;
     buffer->posted = true;
@@ -290,6 +310,7 @@ urmaTransport *urmaTransportCreate(urmaRuntime *runtime, uint64_t epoch, const u
     size_t allocation = sizeof(urmaTransport) + metadata + wire_size;
     size_t charge = allocation + session_size;
     if (charge > runtime->budget - runtime->used) {
+        runtime->stats.budget_rejections++;
         setError(error, "URMA application buffer budget exhausted");
         return NULL;
     }
@@ -341,6 +362,7 @@ urmaTransport *urmaTransportCreate(urmaRuntime *runtime, uint64_t epoch, const u
     }
     return transport;
 failed:
+    runtime->stats.initialization_failures++;
     setError(error, "URMA resource creation/receive posting failed: %s", transport->error);
     urmaTransportRetire(transport);
     return NULL;
@@ -395,6 +417,7 @@ int urmaTransportConnect(urmaTransport *transport, const unsigned char endpoint[
         transport->bound[i] = true;
     }
     transport->connected = true;
+    transport->runtime->stats.ready_total++;
     return 0;
 }
 
@@ -426,6 +449,8 @@ static int receiveCompletion(urmaTransport *transport, const urma_cr_t *completi
     if (urmaSessionGetState(transport->session) != URMA_SESSION_CLOSED &&
         urmaSessionReceive(transport->session, buffer->data, completion->completion_len) != URMA_PROTOCOL_OK)
         return failTransport(transport, "Invalid stream transition", EPROTO);
+    transport->runtime->stats.rx_frames++;
+    transport->runtime->stats.rx_wire_bytes += completion->completion_len;
     if (channel) return postReceive(transport, buffer, 1) < 0 ? -1 : 0;
     if (frame.type == URMA_FRAME_DATA) buffer->ticket = ++transport->received;
     return 0;
@@ -436,6 +461,8 @@ static int sendCompletion(urmaTransport *transport, const urma_cr_t *completion)
     if (!buffer) buffer = findCookie(transport->control, 1, completion->user_ctx);
     if (!buffer) return failTransport(transport, "Unknown TX completion", EPROTO);
     buffer->posted = false;
+    transport->runtime->stats.tx_completions++;
+    transport->runtime->stats.tx_wire_bytes += buffer->length;
     buffer->length = 0;
     buffer->deadline = 0;
     if (buffer->operation) {
@@ -592,7 +619,12 @@ int urmaTransportShutdown(urmaTransport *transport) {
 int urmaTransportDestroy(urmaTransport *transport) {
     if (!transport) return 1;
     if (!owned(transport->runtime)) return 0;
-    failTransport(transport, "Transport aborted", ECANCELED);
+    /* A normal owner close is cancellation, not a transport error. */
+    if (!transport->failed) {
+        setError(transport->error, "Transport aborted (status=%d)", ECANCELED);
+        transport->failed = true;
+        if (transport->session) urmaSessionFail(transport->session);
+    }
     for (int i = 0; i < 2; i++) {
         if (transport->jetty[i]) {
             urma_jetty_attr_t attr = {.mask = JETTY_STATE, .state = URMA_JETTY_STATE_ERROR};
@@ -642,5 +674,6 @@ void urmaTransportRetire(urmaTransport *transport) {
     if (urmaTransportDestroy(transport)) return;
     transport->next = runtime->retired;
     runtime->retired = transport;
+    runtime->retired_count++;
 }
 #endif /* USE_URMA */
