@@ -626,6 +626,7 @@ ENGINE_SERVER_OBJ = \
     tracking.o \
     unix.o \
     urma_protocol.o \
+    urma_session.o \
     util.o \
     valkey-check-aof.o \
     valkey-check-rdb.o \
