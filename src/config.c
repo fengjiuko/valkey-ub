@@ -3497,9 +3497,11 @@ standardConfig static_configs[] = {
     createBoolConfig("lua-enable-insecure-api", "lua-enable-deprecated-api", MODIFIABLE_CONFIG | HIDDEN_CONFIG | PROTECTED_CONFIG, server.lua_enable_insecure_api, 0, NULL, updateLuaEnableInsecureApi),
     createBoolConfig("import-mode", NULL, DEBUG_CONFIG | MODIFIABLE_CONFIG, server.import_mode, 0, NULL, NULL),
     createBoolConfig("io-threads-always-active", NULL, MODIFIABLE_CONFIG | HIDDEN_CONFIG, server.io_threads_always_active, 0, NULL, NULL),
+    createBoolConfig("urma-allow-insecure-bootstrap", NULL, IMMUTABLE_CONFIG, server.urma_allow_insecure_bootstrap, 0, NULL, NULL),
 
     /* String Configs */
     createStringConfig("aclfile", NULL, IMMUTABLE_CONFIG, ALLOW_EMPTY_STRING, server.acl_filename, "", NULL, NULL),
+    createStringConfig("urma-device", NULL, IMMUTABLE_CONFIG, EMPTY_STRING_IS_NULL, server.urma_device, NULL, NULL, NULL),
     createStringConfig("unixsocket", NULL, IMMUTABLE_CONFIG, EMPTY_STRING_IS_NULL, server.unixsocket, NULL, NULL, NULL),
     createStringConfig("unixsocketgroup", NULL, IMMUTABLE_CONFIG, EMPTY_STRING_IS_NULL, server.unix_ctx_config.group, NULL, NULL, NULL),
     createStringConfig("pidfile", NULL, IMMUTABLE_CONFIG, EMPTY_STRING_IS_NULL, server.pidfile, NULL, NULL, NULL),
@@ -3610,6 +3612,8 @@ standardConfig static_configs[] = {
     createIntConfig("shutdown-timeout", NULL, MODIFIABLE_CONFIG, 0, INT_MAX, server.shutdown_timeout, 10, INTEGER_CONFIG, NULL, NULL),
     createIntConfig("repl-diskless-sync-max-replicas", NULL, MODIFIABLE_CONFIG, 0, INT_MAX, server.repl_diskless_sync_max_replicas, 0, INTEGER_CONFIG, NULL, NULL),
     createIntConfig("rdma-port", NULL, MODIFIABLE_CONFIG, 0, 65535, server.rdma_ctx_config.port, 0, INTEGER_CONFIG, NULL, updateRdmaPort),
+    createIntConfig("urma-port", NULL, IMMUTABLE_CONFIG, 0, 65535, server.urma_port, 0, INTEGER_CONFIG, NULL, NULL),
+    createIntConfig("urma-eid-index", NULL, IMMUTABLE_CONFIG, 0, INT_MAX, server.urma_eid_index, 0, INTEGER_CONFIG, NULL, NULL),
     createIntConfig("rdma-rx-size", NULL, IMMUTABLE_CONFIG, 64 * 1024, 16 * 1024 * 1024, server.rdma_ctx_config.rx_size, 1024 * 1024, INTEGER_CONFIG, NULL, NULL),
     createIntConfig("rdma-completion-vector", NULL, IMMUTABLE_CONFIG, -1, 1024, server.rdma_ctx_config.completion_vector, -1, INTEGER_CONFIG, NULL, NULL),
     createIntConfig("cluster-message-gossip-perc", NULL, MODIFIABLE_CONFIG | HIDDEN_CONFIG, 1, 100, server.cluster_message_gossip_perc, 10, INTEGER_CONFIG, NULL, NULL),
@@ -3654,6 +3658,7 @@ standardConfig static_configs[] = {
 
     /* Unsigned Long Long configs */
     createULongLongConfig("maxmemory", NULL, MODIFIABLE_CONFIG, 0, ULLONG_MAX, server.maxmemory, 0, MEMORY_CONFIG, NULL, updateMaxmemory),
+    createULongLongConfig("urma-buffer-limit", NULL, IMMUTABLE_CONFIG, 1, SIZE_MAX, server.urma_buffer_limit, 64 * 1024 * 1024, MEMORY_CONFIG, NULL, NULL),
     createULongLongConfig("cluster-link-sendbuf-limit", NULL, MODIFIABLE_CONFIG, 0, ULLONG_MAX, server.cluster_link_msg_queue_limit_bytes, 0, MEMORY_CONFIG, NULL, NULL),
 
     /* Size_t configs */

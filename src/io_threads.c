@@ -546,6 +546,10 @@ void killIOThreads(void) {
 
 int updateIOThreads(const char **err) {
     serverAssert(inMainThread());
+    if (server.urma_port && server.io_threads_num != 1) {
+        *err = "Native URMA currently requires io-threads 1";
+        return 0;
+    }
 
     int prev_threads_num = 1;
     for (int i = IO_THREADS_MAX_NUM - 1; i > 0; i--) {

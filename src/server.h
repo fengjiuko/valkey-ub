@@ -2520,6 +2520,11 @@ struct valkeyServer {
     sds tls_ca_cert_serial;
     serverUnixContextConfig unix_ctx_config;
     serverRdmaContextConfig rdma_ctx_config;
+    int urma_port;
+    int urma_eid_index;
+    int urma_allow_insecure_bootstrap;
+    char *urma_device;
+    unsigned long long urma_buffer_limit;
     /* cpu affinity */
     char *server_cpulist;         /* cpu affinity list of server main/io thread. */
     char *bio_cpulist;            /* cpu affinity list of bio thread. */

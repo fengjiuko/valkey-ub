@@ -3374,6 +3374,19 @@ void initListeners(void) {
         listener->priv = &server.rdma_ctx_config;
     }
 
+    if (server.urma_port) {
+        ct = connectionByType(CONN_TYPE_URMA);
+        if (!ct) {
+            serverLog(LL_WARNING, "urma-port requires a Linux BUILD_URMA=yes build with liburma");
+            exit(1);
+        }
+        listener = &server.listeners[CONN_TYPE_URMA];
+        listener->bindaddr = server.bindaddr;
+        listener->bindaddr_count = server.bindaddr_count;
+        listener->port = server.urma_port;
+        listener->ct = ct;
+    }
+
     /* create all the configured listener, and add handler to start to accept */
     int listen_fds = 0;
     for (int j = 0; j < CONN_TYPE_MAX; j++) {
