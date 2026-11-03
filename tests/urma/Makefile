@@ -9,7 +9,7 @@ CHECK_FLAGS = -g -O1 -std=gnu11 -ffunction-sections -fdata-sections -DUSE_URMA -
 OBJECTS = $(addprefix $(OUT)/,urma_protocol.o urma_session.o urma_transport.o zmalloc.o serverassert.o)
 
 .PHONY: all test clean
-all: $(OUT)/sdk-probe
+all: $(OUT)/sdk-probe $(OUT)/client-probe
 
 $(OUT):
 	mkdir -p $@
@@ -20,6 +20,9 @@ $(OUT)/%.o: ../../src/%.c | $(OUT)
 $(OUT)/sdk-probe: sdk_probe.c | $(OUT)
 	$(CC) -std=gnu11 -Wall -Wextra -Werror $(URMA_CFLAGS) $< $(URMA_LIBS) -o $@
 
+$(OUT)/client-probe: client_probe.c $(OBJECTS)
+	$(CC) $(CHECK_FLAGS) -Wall -Wextra -Werror $^ -Wl,--gc-sections $(URMA_LIBS) -o $@
+
 # This runner substitutes SDK calls at the SDK seam. It is never linked into
 # server/probe binaries and does not establish hardware compatibility.
 $(OUT)/transport-tests: test_transport.cpp $(OBJECTS)
@@ -29,4 +32,4 @@ test: $(OUT)/transport-tests
 	$(OUT)/transport-tests
 
 clean:
-	rm -f $(OBJECTS) $(OUT)/transport-tests $(OUT)/sdk-probe
+	rm -f $(OBJECTS) $(OUT)/transport-tests $(OUT)/sdk-probe $(OUT)/client-probe
