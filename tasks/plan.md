@@ -4,6 +4,10 @@
 runtime 和实验性入站 ConnectionType 源码已实现。真实 UB 验收及客户端配套待完成。
 日期：2026-11-03。
 
+2026-11-06 补充：用户要求继续远端内存/池化 Value，并明确先采用保留本地权威
+副本的可重建缓存。按 [M1 设计](remote-cache-design.md) 推进独立池、协议与双端
+native 探针的软件实现；不改变数据库对象/命令语义，硬件关口仍未通过。
+
 ## 目标与范围
 
 第一阶段在 Valkey `ConnectionType` 层直接调用 URMA，保持 RESP、AUTH/ACL
@@ -19,6 +23,8 @@ CLI 与 benchmark 的端到端闭环，再扩展 I/O 线程和内部通信链路
 - [任务及验收清单](todo.md)
 - [原生通信设计](urma-architecture.md)
 - [远端内存研究路线](remote-memory-roadmap.md)
+- [可重建缓存与 Value 池实现](remote-cache-design.md)
+- [M1 软件验证记录](validation-remote-cache-2026-11-06.md)
 - [上游讨论草稿](upstream-issue-draft.md)
 - [基础模块验证记录](validation-2026-11-03.md)
 - [SDK/runtime/ConnectionType 验证记录](validation-urma-runtime-2026-11-03.md)
