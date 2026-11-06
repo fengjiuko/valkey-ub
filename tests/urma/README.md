@@ -92,7 +92,40 @@ CLIENT KILL、进程/链路故障、迟到完成、资源恢复及双端字节�
 SDK 的同步 import/bind/delete、异步错误确认及 DMA 终止保证仍需 provider 核验；
 没有完成这些验证前，不能把本实验分支用于生产或宣布 U1/U4/U5 硬件验收完成。
 
-## 本地软件验证
+## 可重建缓存与池化 Value（独立实验）
+
+此路径保留客户端本地权威副本，远端只存可丢弃缓存。设计、wire 字段、身份和
+失败契约见 [M1 设计](../../tasks/remote-cache-design.md)。它不改变服务器对象编码、
+GET/SET、RDB/AOF 或 maxmemory，不是权威容量扩展或已完成的命令缓存适配器。
+
+无 SDK/设备的软件测试：
+
+```sh
+make -C tests/urma memory-test OUT=../../build/remote-cache-plain
+python3 tasks/check-remote-cache.py
+```
+
+`check-remote-cache.py` 在 `build/remote-cache-check` 保存普通、ASan/UBSan/泄漏
+及三项负向变异日志。SDK seam 中另测试 65537 字节缓存消息跨有界 native 流，
+不代表真实网络或 DMA 已验证。
+
+使用已准备好的 SDK 运行 `make -C tests/urma all` 可构建 `cache-probe`。它不是只读
+环境检查脚本，会为本进程创建传输资源并执行数据收发；在获准双机测试窗口中，
+替换实际地址、设备和 EID index 后分别执行（不需要 root，不加载/重配任何设备）：
+
+```sh
+# 缓存端，仅一个客户端、四个请求；PORT 应是未被占用的专用应用端口。
+./build/urma-runtime/cache-probe --serve CACHE_HOST PORT DEVICE EID_INDEX --allow-insecure-bootstrap
+# 权威副本端；两端设备名/EID index 分别按各自主机填写。
+./build/urma-runtime/cache-probe --check CACHE_HOST PORT DEVICE EID_INDEX --allow-insecure-bootstrap
+```
+
+仅明文交换 HELLO/endpoint/RDY1，Value PUT/GET/DROP 只走 URMA。测试保留本地
+65537 字节二进制权威缓冲，验证 PUT、版本不匹配 MISS、内容校验 GET 和 DROP，
+并要求双向关闭及本进程资源删除成功。池容量、元数据、live/hit/miss 单独输出。
+引导不认证/加密，CRC 不提供恶意对端防护；只适用于明确允许的隔离环境。
+
+## 既有 runtime 与 adapter 验证
 
 可从已有 TCP 管理监听执行 `INFO urma`（`INFO all` 也包含该节）。
 `urma_compiled` 与 `urma_listener_enabled` 分别表示构建能力和监听配置；
