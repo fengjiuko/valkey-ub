@@ -125,6 +125,7 @@ set(VALKEY_SERVER_SRCS
     ${CMAKE_SOURCE_DIR}/src/urma_session.c
     ${CMAKE_SOURCE_DIR}/src/urma_transport.c
     ${CMAKE_SOURCE_DIR}/src/urma.c
+    ${CMAKE_SOURCE_DIR}/src/remote_value.c
     ${CMAKE_SOURCE_DIR}/src/server.c
     ${CMAKE_SOURCE_DIR}/src/logreqres.c
     ${CMAKE_SOURCE_DIR}/src/entry.c

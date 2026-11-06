@@ -644,6 +644,7 @@ ENGINE_SERVER_OBJ = \
     urma_session.o \
     urma_transport.o \
     urma.o \
+    remote_value.o \
     util.o \
     valkey-check-aof.o \
     valkey-check-rdb.o \
