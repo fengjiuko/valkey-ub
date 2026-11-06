@@ -9,6 +9,8 @@
 #include <time.h>
 #include <urma_api.h>
 extern "C" {
+#include "crc64.h"
+#include "remote_cache.h"
 #include "urma_transport.h"
 }
 
@@ -585,6 +587,132 @@ TEST(UrmaTransportTest, RetryCreditAndClosePreserveByteStream) {
   EXPECT_EQ(urmaTransportShutdown(sender), 1);
   EXPECT_EQ(urmaTransportDestroy(sender), 1);
   EXPECT_EQ(urmaTransportDestroy(receiver), 1);
+  EXPECT_EQ(urmaRuntimeClose(runtime), 1);
+  EXPECT_EQ(allocations, 0u);
+}
+
+static int transferCacheBytes(urmaTransport *sender, urmaTransport *receiver,
+                              const unsigned char *input, size_t length,
+                              unsigned char *output) {
+  size_t sent = 0, received = 0;
+  for (unsigned int turn = 0; turn < 4096; turn++) {
+    if (urmaTransportProgress(sender, 64) < 0 ||
+        urmaTransportProgress(receiver, 64) < 0)
+      return 0;
+    if (sent < length) {
+      urmaIoResult result =
+          urmaTransportWrite(sender, input + sent, length - sent);
+      if (result.status == URMA_IO_ERROR)
+        return 0;
+      sent += result.bytes;
+    }
+    if (urmaTransportProgress(sender, 64) < 0 ||
+        urmaTransportProgress(receiver, 64) < 0)
+      return 0;
+    urmaIoResult result =
+        urmaTransportRead(receiver, output + received, length - received);
+    if (result.status == URMA_IO_ERROR || result.status == URMA_IO_EOF)
+      return 0;
+    received += result.bytes;
+    if (received == length)
+      return sent == length;
+  }
+  return 0;
+}
+
+TEST(UrmaTransportTest, PooledCacheRequestsCrossBoundedNativeStreamAtSdkSeam) {
+  crc64_init();
+  char error[URMA_ERROR_SIZE];
+  urmaRuntime *runtime = urmaRuntimeOpen("test", 0, 2 * 1024 * 1024, error);
+  ASSERT_NE(runtime, nullptr);
+  urmaHello hello = {0, 0, 1024, 2};
+  urmaTransport *client = urmaTransportCreate(runtime, 42, &hello, error);
+  urmaTransport *server = urmaTransportCreate(runtime, 42, &hello, error);
+  ASSERT_NE(client, nullptr);
+  ASSERT_NE(server, nullptr);
+  unsigned char first[URMA_ENDPOINT_SIZE], second[URMA_ENDPOINT_SIZE];
+  urmaTransportEndpoint(client, first);
+  urmaTransportEndpoint(server, second);
+  EXPECT_EQ(urmaTransportConnect(client, second, &hello), 0);
+  EXPECT_EQ(urmaTransportConnect(server, first, &hello), 0);
+  const uint32_t size = 65537;
+  unsigned char *authority = (unsigned char *)malloc(size);
+  unsigned char *arena = (unsigned char *)malloc(size);
+  unsigned char *tx = (unsigned char *)malloc(REMOTE_CACHE_HEADER_SIZE + size);
+  unsigned char *rx = (unsigned char *)malloc(REMOTE_CACHE_HEADER_SIZE + size);
+  unsigned char *output = (unsigned char *)malloc(size);
+  ASSERT_TRUE(authority && arena && tx && rx && output);
+  for (uint32_t i = 0; i < size; i++)
+    authority[i] = (i * 37) & 255;
+  remoteValuePool *pool = remoteValuePoolCreate(arena, size, size, 99);
+  ASSERT_NE(pool, nullptr);
+  remoteCacheMessage request = {};
+  request.opcode = REMOTE_CACHE_PUT;
+  request.request_id = 1;
+  request.identity.owner = 1;
+  request.identity.object = 2;
+  request.version = 1;
+  request.ref.length = size;
+  request.ref.checksum = crc64(0, authority, size);
+  request.ttl = 100;
+  request.payload_length = size;
+  request.payload = authority;
+  remoteValueRef ref = {};
+  for (unsigned int round = 0; round < 4; round++) {
+    request.request_id = round + 1;
+    if (round) {
+      request.opcode = round == 3 ? REMOTE_CACHE_DROP : REMOTE_CACHE_GET;
+      request.version = round == 1 ? 2 : 1;
+      request.ref = ref;
+      request.ttl = 0;
+      request.payload_length = 0;
+      request.payload = NULL;
+    }
+    size_t length = 0;
+    EXPECT_EQ(remoteCacheEncode(tx, REMOTE_CACHE_HEADER_SIZE + size, &request,
+                                &length),
+              REMOTE_CACHE_OK);
+    EXPECT_TRUE(transferCacheBytes(client, server, tx, length, rx));
+    remoteCacheMessage received, reply;
+    EXPECT_EQ(remoteCacheDecode(rx, length, &received), REMOTE_CACHE_OK);
+    remoteValueView view = {};
+    EXPECT_EQ(remoteCacheApply(pool, &received, 10, &reply, &view),
+              round == 1 ? REMOTE_VALUE_MISS : REMOTE_VALUE_OK);
+    EXPECT_EQ(
+        remoteCacheEncode(tx, REMOTE_CACHE_HEADER_SIZE + size, &reply, &length),
+        REMOTE_CACHE_OK);
+    if (view.pool) {
+      EXPECT_EQ(remoteValueRelease(&view), 1);
+    }
+    EXPECT_TRUE(transferCacheBytes(server, client, tx, length, rx));
+    EXPECT_EQ(remoteCacheDecode(rx, length, &reply), REMOTE_CACHE_OK);
+    if (!round) {
+      EXPECT_EQ(
+          remoteCacheAcceptPut(&request, &reply, request.identity, 1, &ref), 1);
+    }
+    if (round == 2) {
+      EXPECT_EQ(remoteCacheAcceptGet(&request, &reply, request.identity, 1,
+                                     output, size, &length),
+                1);
+      EXPECT_EQ(length, size);
+      EXPECT_EQ(memcmp(output, authority, size), 0);
+    }
+  }
+  remoteValueStats stats;
+  remoteValuePoolStats(pool, &stats);
+  EXPECT_EQ(stats.live_slots, 0u);
+  EXPECT_EQ(stats.pins, 0u);
+  EXPECT_EQ(stats.hits, 1u);
+  EXPECT_EQ(stats.misses, 1u);
+  EXPECT_EQ(remoteValuePoolFree(pool), 1);
+  free(authority);
+  free(arena);
+  free(tx);
+  free(rx);
+  free(output);
+  EXPECT_EQ(urmaTransportDestroy(client), 1);
+  EXPECT_EQ(urmaTransportDestroy(server), 1);
+  EXPECT_EQ(urmaRuntimeMemory(runtime), 0u);
   EXPECT_EQ(urmaRuntimeClose(runtime), 1);
   EXPECT_EQ(allocations, 0u);
 }
