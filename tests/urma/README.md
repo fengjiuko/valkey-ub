@@ -17,6 +17,17 @@ build/urma-runtime/sdk-probe --inventory
 ```
 
 默认构建不依赖 SDK；启用时需要 Linux 和实际 liburma 开发包。
+先验收普通 Valkey 部署时，使用非 root 用户运行以下独立 TCP 冒烟测试：
+
+```sh
+python3 tests/urma/test_tcp_deployment.py "$PWD/src/valkey-server" "$PWD/src/valkey-cli"
+```
+
+它创建自己的临时目录、ACL 和回环 TCP 实例，检查认证、读写、重连及 RDB
+保存/重启恢复；仅停止自己的子进程。它会启动应用，不属于只读 preflight；
+不导入原配置或操作设备。默认构建及 SDK 构建都显式关闭 URMA。
+现场已有 ACL 与跨机验收见 [部署基线](../../tasks/deployment-baseline-2026-11-09.md)。
+
 默认头文件目录为 `/usr/include/ub/umdk/urma`，链接 `-lurma`。
 开发参考 SHA：`7c8a9541cba083c22ffc55596f7937f991eeae1a`；实际包、provider、
 驱动、固件与硬件组合仍须在内网锁定。本地只编译了该快照的 core/common
