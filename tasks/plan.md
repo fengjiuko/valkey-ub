@@ -4,6 +4,15 @@
 runtime 和实验性入站 ConnectionType 源码已实现。真实 UB 验收及客户端配套待完成。
 日期：2026-11-03。
 
+2026-11-09 优先级调整：用户要求先确认目标环境可完成 Valkey 部署，再推进组件适配。
+当前前置任务改为 204 服务端、202 客户端的普通 TCP 独立实例验收，使用现有二进制
+关闭 URMA 监听，确认依赖、启动、认证、跨机读写及测试数据保存/重启恢复。
+执行步骤见 [部署基线](deployment-baseline-2026-11-09.md)，关口见 todo.md 的 D0–D3。
+在该关口取得现场证据前，不推进顺序模式补丁、原生客户端或远端缓存命令接入。
+既有实现和测试记录保留；本地软件测试及官方 URMA 样例不替代这次部署验收。
+部署验证使用最小独立启动参数及已有测试 ACL，不导入原配置中的复制、集群、
+模块和额外监听。先完成本地验证，现场按文档验收，见 [本轮记录](validation-deployment-2026-11-09.md)。
+
 2026-11-06 补充：用户要求继续远端内存/池化 Value，并明确先采用保留本地权威
 副本的可重建缓存。按 [M1 设计](remote-cache-design.md) 推进独立池、协议与双端
 native 探针的软件实现；不改变数据库对象/命令语义，硬件关口仍未通过。
@@ -21,6 +30,8 @@ CLI 与 benchmark 的端到端闭环，再扩展 I/O 线程和内部通信链路
 工作文档索引：
 
 - [任务及验收清单](todo.md)
+- [普通 TCP 部署及现场验收](deployment-baseline-2026-11-09.md)
+- [本地部署验证记录](validation-deployment-2026-11-09.md)
 - [原生通信设计](urma-architecture.md)
 - [远端内存研究路线](remote-memory-roadmap.md)
 - [可重建缓存与 Value 池实现](remote-cache-design.md)
@@ -32,8 +43,8 @@ CLI 与 benchmark 的端到端闭环，再扩展 I/O 线程和内部通信链路
 ## 依据与本地检查
 
 - Valkey 基线：`e581052a6007a0e12cdd8808391b5c745c915037`。
-- 用户确认目标处理器平台为鲲鹏 950；UB 设备/provider、发行版及内核版本未知。
-  鲲鹏 950 不是 Linux 内核版本。
+- 用户确认目标处理器平台为鲲鹏 950；后续任务记录补充为 aarch64/openEuler 6.6，
+  尚待现场 D0 核对；UB 设备/provider 组合仍待归档。鲲鹏 950 不是 Linux 内核版本。
 - 用户本地没有测试机；真实设备验证在内网 clone 后进行。
 - Windows 本地已有 MinGW GCC、CMake；WSL Ubuntu 26.04.1 中确认有 GCC、
   G++、Make、Python 和 pkg-config；系统未安装 URMA 开发包，未发现 UB 设备。
