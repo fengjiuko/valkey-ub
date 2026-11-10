@@ -108,6 +108,34 @@ python3 -u "$HOME/valkey-rdma-baseline-tools/utils/rdma_baseline.py" client \
 客户端 `COMPLETE` 文件只表示 10 个客户端样本均有效，完整报告还需检查服务端
 CPU 日志和两端设备/环境证据。失败时查看 `FAILED.txt`，保留归档，不能补齐不存在的数据。
 
+## 在 202 上做同机测试
+
+`--host` 同时控制服务端 RDMA 绑定地址、客户端目标和路由查询；默认仍为
+`192.168.17.204`。204 尚未准备好时，可以在 202 开两个终端，都指定
+`--host 192.168.17.202`。复用先前已构建的 202 源码树，在工具仓库根目录执行：
+
+```bash
+# 202 终端 A：保持运行，等出现 READY: 192.168.17.202:16381。
+python3 -u utils/rdma_baseline.py server \
+  --source "$HOME/valkey-validation/rdma-cross-client.M6uyNa/source" \
+  --host 192.168.17.202
+```
+
+```bash
+# 202 终端 B：完成后，在终端 A 按 Ctrl+C，保留两份归档。
+python3 -u utils/rdma_baseline.py client \
+  --source "$HOME/valkey-validation/rdma-cross-client.M6uyNa/source" \
+  --host 192.168.17.202
+```
+
+源码目录若不同，替换 `--source`，其上层必须有记录固定 SHA 的 `source-sha.txt`。
+该参数指向被测二进制所在源码树，与采集脚本所在工具仓库是两个概念。
+使用 `python3 -u` 实时打印输出；`python3 -i` 会在结束或参数错误后进入 `>>>`
+交互模式，此时输入 `exit()` 退出。
+
+此模式的客户端与服务端共享同一主机资源，只作为同机测试结果展示；不能作为
+202 → 204 跨机性能数据，也不能据此作 UB/RDMA 性能结论。
+
 ## 输出和展示口径
 
 - `results.csv`：每轮 QPS、请求数、测量时间和 avg/min/p50/p95/p99/max 延迟。

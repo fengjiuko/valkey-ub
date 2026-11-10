@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the first 202 -> 204 RDMA baseline; Python standard library only."""
+"""Run an isolated RDMA baseline; Python standard library only."""
 import argparse
 import csv
 import hashlib
@@ -33,10 +33,10 @@ def info_fields(text):
     return dict(line.split(":", 1) for line in text.splitlines() if ":" in line and not line.startswith("#"))
 
 
-def metadata(out, source, role):
+def metadata(out, source, role, host=HOST):
     if (source.parent / "source-sha.txt").read_text().strip() != SHA:
         raise RuntimeError("source-sha.txt does not match the validated SHA")
-    data = {"role": role, "source_sha": SHA, "source": str(source), "wall_time_ns": time.time_ns(),
+    data = {"role": role, "source_sha": SHA, "source": str(source), "rdma_host": host, "wall_time_ns": time.time_ns(),
             "hostname": os.uname().nodename, "kernel": list(os.uname()), "affinity_policy": "OS default; no pinning",
             "collector_affinity": sorted(os.sched_getaffinity(0)), "clock_ticks": os.sysconf("SC_CLK_TCK"),
             "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), "binaries": {}}
@@ -48,7 +48,7 @@ def metadata(out, source, role):
     if settings.exists():
         shutil.copyfile(str(settings), str(out / "build-settings.txt"))
     for name, cmd in {"cpu": ["lscpu"], "rdma": ["ibv_devinfo"],
-                      "route": ["ip", "route", "get", "192.168.17.204"],
+                      "route": ["ip", "route", "get", host],
                       "link": ["ip", "-s", "link", "show", "enp40s0f0np0"]}.items():
         try:
             (out / (name + ".txt")).write_text(query(cmd), encoding="utf-8")
@@ -145,14 +145,14 @@ def launch_logged(command, log, timeout, cpu_path=None):
         raise RuntimeError("command exit=%d; see %s" % (rc, log))
 
 
-def cli_command(source):
-    return [str(source / "src/valkey-cli"), "--rdma", "-h", HOST, "-p", str(PORT), "--raw"]
+def cli_command(source, host=HOST):
+    return [str(source / "src/valkey-cli"), "--rdma", "-h", host, "-p", str(PORT), "--raw"]
 
 
-def server(source, out):
+def server(source, out, host=HOST):
     data = out / "data"
     data.mkdir()
-    command = [str(source / "src/valkey-server"), "--port", "0", "--rdma-bind", HOST,
+    command = [str(source / "src/valkey-server"), "--port", "0", "--rdma-bind", host,
                "--rdma-port", str(PORT), "--urma-port", "0", "--protected-mode", "no",
                "--cluster-enabled", "no", "--appendonly", "no", "--save", "",
                "--maxmemory", "0", "--io-threads", "1", "--dir", str(data),
@@ -168,14 +168,14 @@ def server(source, out):
                     if process.poll() is not None:
                         raise RuntimeError("server exited; inspect server.log")
                     try:
-                        if query(cli_command(source) + ["PING"]) == "PONG":
+                        if query(cli_command(source, host) + ["PING"]) == "PONG":
                             break
                     except (OSError, subprocess.SubprocessError):
                         pass
                     time.sleep(1)
                 else:
                     raise RuntimeError("server did not become ready")
-                print("READY: %s:%d; leave this terminal open. Ctrl+C after client finishes." % (HOST, PORT), flush=True)
+                print("READY: %s:%d; leave this terminal open. Ctrl+C after client finishes." % (host, PORT), flush=True)
                 rc = process.wait()
                 if rc:
                     raise RuntimeError("server exited with %d" % rc)
@@ -199,8 +199,8 @@ def parse_report(text):
             **dict(zip(("avg_ms", "min_ms", "p50_ms", "p95_ms", "p99_ms", "max_ms"), map(float, latency.groups())))}
 
 
-def client(source, out):
-    cli = cli_command(source)
+def client(source, out, host=HOST):
+    cli = cli_command(source, host)
     if query(cli + ["PING"]) != "PONG":
         raise RuntimeError("RDMA PING failed")
     server_info = info_fields(query(cli + ["INFO", "server"]))
@@ -215,10 +215,10 @@ def client(source, out):
             raise RuntimeError("unexpected server setting %s: %r" % (name, actual))
     if query(cli + ["DBSIZE"]) != "0":
         raise RuntimeError("expected a fresh EMPTY dedicated performance instance; refusing to erase data")
-    common = [str(source / "src/valkey-benchmark"), "--rdma", "-h", HOST, "-p", str(PORT),
+    common = [str(source / "src/valkey-benchmark"), "--rdma", "-h", host, "-p", str(PORT),
               "--threads", "1", "-c", "32", "-P", "1", "-d", str(SIZE), "-r", str(KEYS),
               "--seed", "20261110", "--precision", "3"]
-    config = {"source_sha": SHA, "host": HOST, "port": PORT, "value_bytes": SIZE, "keys": KEYS,
+    config = {"source_sha": SHA, "host": host, "port": PORT, "value_bytes": SIZE, "keys": KEYS,
               "connections": 32, "pipeline": 1, "client_threads": 1, "server_io_threads": 1,
               "warmup_seconds": WARMUP, "measurement_seconds": DURATION, "repeats_per_operation": REPEATS,
               "cpu_sampling": "1 second; 100% = one logical CPU; raw samples include warmup",
@@ -292,6 +292,8 @@ def main():
     parser.add_argument("role", choices=("server", "client"))
     parser.add_argument("--source", type=Path, required=True,
                         help="built source snapshot; parent must contain source-sha.txt")
+    parser.add_argument("--host", default=HOST,
+                        help="server RDMA bind address / client target (default: %(default)s)")
     args = parser.parse_args()
     if sys.platform != "linux":
         parser.error("run on the Linux test hosts; --help is available on other platforms")
@@ -304,9 +306,9 @@ def main():
         raise KeyboardInterrupt()
     signal.signal(signal.SIGTERM, interrupted)
     try:
-        metadata(out, source, args.role)
+        metadata(out, source, args.role, args.host)
         counters(out, "before")
-        (server if args.role == "server" else client)(source, out)
+        (server if args.role == "server" else client)(source, out, args.host)
     except KeyboardInterrupt:
         print("Stopped; evidence preserved: %s" % out, flush=True)
         return 130

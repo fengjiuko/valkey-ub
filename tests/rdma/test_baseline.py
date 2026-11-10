@@ -118,6 +118,45 @@ class BaselineTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0)
         self.assertIn(b"--source", result.stdout)
+        self.assertIn(b"--host", result.stdout)
+
+    def test_server_binds_and_checks_readiness_at_selected_address(self):
+        process = mock.Mock(pid=123)
+        process.poll.side_effect = [None, 0]
+        process.wait.return_value = 0
+        with mock.patch.object(baseline.subprocess, "Popen", return_value=process) as launch, \
+                mock.patch.object(baseline, "CpuSamples"), \
+                mock.patch.object(baseline, "query", return_value="PONG") as query, \
+                mock.patch.object(baseline, "counters"):
+            baseline.server(self.folder, self.folder, host="192.168.17.202")
+        command = launch.call_args.args[0]
+        self.assertEqual(command[command.index("--rdma-bind") + 1], "192.168.17.202")
+        command = query.call_args.args[0]
+        self.assertEqual(command[command.index("-h") + 1], "192.168.17.202")
+
+    def test_client_cli_and_benchmark_use_selected_address(self):
+        settings = {"port": "0", "rdma-port": "16381", "urma-port": "0", "io-threads": "1",
+                    "appendonly": "no", "save": "", "maxmemory": "0", "cluster-enabled": "no"}
+
+        def respond(command):
+            self.assertEqual(command[command.index("-h") + 1], "192.168.17.202")
+            if command[-1] == "PING":
+                return "PONG"
+            if command[-2:] == ["INFO", "server"]:
+                return "run_id:test-instance"
+            if command[-3:-1] == ["CONFIG", "GET"]:
+                name = command[-1]
+                return name + "\n" + settings[name]
+            if command[-1] == "DBSIZE":
+                return "0"
+            raise AssertionError("unexpected query: %r" % command)
+
+        with mock.patch.object(baseline, "query", side_effect=respond), \
+                mock.patch.object(baseline, "launch_logged", side_effect=RuntimeError("prefill reached")) as launch:
+            with self.assertRaisesRegex(RuntimeError, "prefill reached"):
+                baseline.client(self.folder, self.folder, host="192.168.17.202")
+        command = launch.call_args.args[0]
+        self.assertEqual(command[command.index("-h") + 1], "192.168.17.202")
 
 
 if __name__ == "__main__":
