@@ -6,6 +6,10 @@
 [性能基线复现说明](202-204-performance-baseline.zh-CN.md)。
 202 的 UB 查询结果及下一步见 [排序能力诊断](202-ub-order-diagnostic.zh-CN.md)。
 现场命令由用户执行；本地软件检查不替代硬件测试。
+后续性能口径和可并行的软件工作见
+[RDMA / 原生 URMA 评估改进方案](rdma-urma-performance-comparison-design.zh-CN.md)。
+该方案中的统一 URMA 发生器尚未实现；当前可先准备 TCP/RDMA 对照，原生 URMA
+仍需通过平台建链和应用功能准入。
 
 ## 进度与执行顺序
 
