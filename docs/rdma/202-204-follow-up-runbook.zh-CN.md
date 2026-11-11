@@ -10,6 +10,8 @@
 [RDMA / 原生 URMA 评估改进方案](rdma-urma-performance-comparison-design.zh-CN.md)。
 该方案中的统一 URMA 发生器尚未实现；当前可先准备 TCP/RDMA 对照，原生 URMA
 仍需通过平台建链和应用功能准入。
+204 单机的 root/绝对路径验证入口见 [204 UB 验证步骤](204-ub-validation.zh-CN.md)，
+从设备枚举开始，不能沿用 202 的设备名/EID。
 
 ## 进度与执行顺序
 
