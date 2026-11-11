@@ -4,9 +4,11 @@
 两端 CPU 采集入口。采集器只依赖 Python 3 标准库，入口是
 [`utils/rdma_baseline.py`](../../utils/rdma_baseline.py)。
 
-2026-11-11 用户确认两台环境暂不可用。恢复后按
-[后续测试操作手册](202-204-follow-up-runbook.zh-CN.md)执行环境复核、功能复验、
-双机性能采集、日志回收和 UB 对比准备；当前没有新增现场性能结果。
+2026-11-11 阶段更新：用户报告 202 同机 RDMA 采集完成，归档为
+`rdma-perf-client-szdmcbh1.tar.gz`、`rdma-perf-server-ofbutjgq.tar.gz`，尚待回收审阅。
+后续按 [操作手册](202-204-follow-up-runbook.zh-CN.md)推进；202 的 UB 设备枚举成功，
+但排序能力与当前适配器要求不匹配，见 [UB 排序诊断](202-ub-order-diagnostic.zh-CN.md)。
+双机性能基线及 UB 同机功能尚无完成证据，204 当前可用性待确认。
 
 ## 已有证据与待测范围
 

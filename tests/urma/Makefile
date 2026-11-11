@@ -9,7 +9,7 @@ CHECK_FLAGS = -g -O1 -std=gnu11 -ffunction-sections -fdata-sections -DUSE_URMA -
 OBJECTS = $(addprefix $(OUT)/,urma_protocol.o urma_session.o urma_transport.o zmalloc.o serverassert.o)
 MEMORY_OBJECTS = $(addprefix $(OUT)/,remote_value.o remote_cache.o crc64.o crcspeed.o crccombine.o zmalloc.o serverassert.o)
 
-.PHONY: all test memory-test clean
+.PHONY: all test memory-test test-order-probe clean
 all: $(OUT)/sdk-probe $(OUT)/client-probe $(OUT)/cache-probe
 
 $(OUT):
@@ -22,6 +22,15 @@ $(OUT)/%.o: ../../src/%.c | $(OUT)
 
 $(OUT)/sdk-probe: sdk_probe.c | $(OUT)
 	$(CC) -std=gnu11 -Wall -Wextra -Werror $(URMA_CFLAGS) $< $(URMA_LIBS) -o $@
+
+$(OUT)/order-probe: order_probe.c | $(OUT)
+	$(CC) -std=gnu11 -Wall -Wextra -Werror $(URMA_CFLAGS) $< $(URMA_LIBS) -o $@
+
+$(OUT)/order-probe-mock: order_probe.c order_probe_mock.c | $(OUT)
+	$(CC) -std=gnu11 -Wall -Wextra -Werror $(URMA_CFLAGS) $^ -o $@
+
+test-order-probe: $(OUT)/order-probe-mock
+	python3 test_order_probe.py $(OUT)/order-probe-mock
 
 $(OUT)/client-probe: client_probe.c $(OBJECTS)
 	$(CC) $(CHECK_FLAGS) -Wall -Wextra -Werror $(filter %.c %.o,$^) -Wl,--gc-sections $(URMA_LIBS) -o $@
@@ -49,5 +58,5 @@ $(OUT)/cache-probe: cache_probe.c $(sort $(OBJECTS) $(MEMORY_OBJECTS))
 $(OUT)/cache-probe: probe_io.h
 
 clean:
-	rm -f $(sort $(OBJECTS) $(MEMORY_OBJECTS)) $(OUT)/transport-tests $(OUT)/memory-tests $(OUT)/sdk-probe $(OUT)/client-probe $(OUT)/cache-probe
+	rm -f $(sort $(OBJECTS) $(MEMORY_OBJECTS)) $(OUT)/transport-tests $(OUT)/memory-tests $(OUT)/sdk-probe $(OUT)/order-probe $(OUT)/order-probe-mock $(OUT)/client-probe $(OUT)/cache-probe
 	rm -f $(sort $(OBJECTS:.o=.d) $(MEMORY_OBJECTS:.o=.d))
