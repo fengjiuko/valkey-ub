@@ -94,62 +94,55 @@ printf 'order-probe exit=%s\nEVIDENCE=%s\n' "$status" "$diag_root"
 “OT 资源不可创建”。能力报告与接受配置之间存在差异；是否真正提供预期排序保证、
 是否可以建链及收发，仍待验证。现有 Valkey OT 门禁尚未更改。
 
-## 下一步：SDK 自带工具做 RC/OT 同机收发
+## SDK 收发现场失败及参数复核
 
-先用发行包自带工具验证建链和收发完成，避免在 Valkey 里同时排查 SDK/控制面和
-应用协议。两端进程都运行在 202；TCP loopback 只用于工具控制连接，设备仍显式选为
-`udmac0d1e2`，EID index 0，RC 模式、显式 OT。
+此前依据通用手册给出的 TCP loopback 控制命令没有覆盖现场二进制的 UB 管理通道
+参数，不能继续作为该环境的已验证运行命令。实际日志记录：
 
-先检查本机工具及参数：
+| 已执行配置 | 可确认的结果 |
+| --- | --- |
+| RC、OT、设备 udmac0d1e2、EID index 0，控制端口 21116 | 两端 `Failed to import jetty: 0!`，退出码均为 255 |
+| 加 `--share_jfr true` 的 OT 客户端重试 | share_jfr 警告消失，但仍 import 失败；该段未包含配对服务端的完整命令和退出码 |
+| RC、默认排序、share_jfr true，控制端口 21117 | 两端 `Failed to bind jetty: 0!`，该段未记录退出码 |
 
-```bash
-command -v urma_perftest
-urma_perftest send_lat --help
-```
+因此尚未进入成功收发。share_jfr 警告消失不能证明它是根因；默认排序与 OT 的失败
+阶段不同，需要在相同且已核对的管理通道配置下重新配对比较。
+`Failed ... jetty: 0!` 中 0 的含义需要对应工具源码确认，不把它当作明确的 errno。
 
-下面参数依据 [openEuler 工具手册](https://docs.openeuler.org/zh/docs/24.03_LTS_SP3/unifiedbus/unifiedbus/urma/URMA%20User%20Guide.ch.html)。
-以现场帮助为准；确认支持 `--order_type`、`--eid_idx`、`-p`（trans_mode）、`-P`（控制端口）
-后再运行。若工具缺失或参数不同，保留帮助/错误输出，不猜测参数或安装其他版本替代。
+现场帮助片段新增了 `--mgmt_addr <eid>`，说明为 UB 模式的本地管理 EID，且为必填。
+另一行出现“UB mode: server mgmt eid (required for client)”，但 grep 截断了所属选项
+及相邻说明，不能将它直接归到 `--eid_idx`。需要完整帮助来确认控制通道模式、
+客户端远端地址参数及 EID 字符串格式；此时不能直接认定 `-S 127.0.0.1` 对 UB 模式有效。
 
-202 终端 A，先启动服务端，等待终端 B 连接：
+用户输出中夹带的分析段落和未执行命令不作为测试证据。尤其是最后一组 mgmt_addr
+建议省略了 `-p 1`，按通用手册会回到 RM 默认值，不能当作原 RC/OT 用例的修正结果。
+EID 的选择依据实际拓扑和 SDK 契约，不能根据十六进制字符串中出现的某个字节猜测。
+目前也没有证据确认 204 已有可用的原生 UB 路径。
 
-```bash
-(
-set +e
-sdk_root=$(mktemp -d "$HOME/valkey-validation/ub-sdk-server.XXXXXX") || exit 1
-timeout 120s urma_perftest send_lat \
-  -d udmac0d1e2 --eid_idx 0 -p 1 --order_type 1 \
-  -P 21116 -s 256 -n 10000 2>&1 | tee "$sdk_root/send-lat.log"
-status=${PIPESTATUS[0]}
-printf '%s\n' "$status" > "$sdk_root/send-lat.exit"
-printf 'SDK server exit=%s\nEVIDENCE=%s\n' "$status" "$sdk_root"
-)
-```
-
-202 终端 B，服务端启动后尽快执行：
+下一步在 202 一次性采集完整工具帮助及二进制身份；此阶段不创建传输资源：
 
 ```bash
 (
 set +e
-sdk_root=$(mktemp -d "$HOME/valkey-validation/ub-sdk-client.XXXXXX") || exit 1
-timeout 120s urma_perftest send_lat \
-  -d udmac0d1e2 --eid_idx 0 -p 1 --order_type 1 \
-  -P 21116 -S 127.0.0.1 -s 256 -n 10000 \
-  2>&1 | tee "$sdk_root/send-lat.log"
-status=${PIPESTATUS[0]}
-printf '%s\n' "$status" > "$sdk_root/send-lat.exit"
-printf 'SDK client exit=%s\nEVIDENCE=%s\n' "$status" "$sdk_root"
+help_root=$(mktemp -d "$HOME/valkey-validation/ub-perftest-help.XXXXXX") || exit 1
+tool_path=$(command -v urma_perftest) || exit 1
+real_path=$(readlink -f "$tool_path") || exit 1
+printf 'command=%s\nreal_path=%s\n' "$tool_path" "$real_path" > "$help_root/tool.txt"
+sha256sum "$real_path" >> "$help_root/tool.txt"
+rpm -qf "$real_path" > "$help_root/package.txt" 2>&1
+"$tool_path" send_lat --help > "$help_root/help.txt" 2>&1
+printf '%s\n' "$?" > "$help_root/help.exit"
+cat "$help_root/tool.txt" "$help_root/package.txt" "$help_root/help.txt"
+printf 'HELP_EVIDENCE=%s\n' "$help_root"
 )
 ```
 
-检查两端完整输出、退出码及实际显示的 RC/OT、设备/EID/消息大小/迭代次数。
-服务端若在客户端启动前超时，记录原因并成对重跑；其他建链/完成错误先保留日志，
-不盲目更换排序、设备或修改控制面配置。是否支持同机回环以实际结果为准。
+确认现场 CLI 契约后，再固定一组配对命令，明确本地/远端管理 EID、RC、共享 JFR、
+OT、设备、EID index 和端口；一次只改变一个变量。未核对前不批量更换设备/EID，
+不混加 CTP、tp_aware、simplex，也不修改控制面配置。
 
-本阶段只能证明对应配置下的 SDK 建链和收发完成，不能代替严格的接收顺序、
-Payload 完整性、分段/credit/CLOSE 验证，也不是 Valkey SET/GET 性能。
-成功后再评估能力报告兼容方案和 Valkey 功能验收，不将 perftest 延迟与此前
-Valkey benchmark 的 QPS 直接对比。
+即使 SDK 收发完成，仍需严格的接收顺序、Payload 完整性、分段/credit/CLOSE 验证，
+才进入 Valkey 功能验收。perftest 延迟不直接与 Valkey benchmark 的 QPS 比较。
 
 ## 软件检查边界
 
