@@ -96,8 +96,9 @@ printf 'order-probe exit=%s\nEVIDENCE=%s\n' "$status" "$diag_root"
 
 ## SDK 收发现场失败及参数复核
 
-此前依据通用手册给出的 TCP loopback 控制命令没有覆盖现场二进制的 UB 管理通道
-参数，不能继续作为该环境的已验证运行命令。实际日志记录：
+此前的收发命令尚未跑通，不能作为已验证运行命令。完整帮助现已确认其默认管理
+通道为 TCP；“缺少 UB 管理 EID”并不是解释此前 TCP 模式失败的已验证根因。
+实际日志记录：
 
 | 已执行配置 | 可确认的结果 |
 | --- | --- |
@@ -109,37 +110,66 @@ printf 'order-probe exit=%s\nEVIDENCE=%s\n' "$status" "$diag_root"
 阶段不同，需要在相同且已核对的管理通道配置下重新配对比较。
 `Failed ... jetty: 0!` 中 0 的含义需要对应工具源码确认，不把它当作明确的 errno。
 
-现场帮助片段新增了 `--mgmt_addr <eid>`，说明为 UB 模式的本地管理 EID，且为必填。
-另一行出现“UB mode: server mgmt eid (required for client)”，但 grep 截断了所属选项
-及相邻说明，不能将它直接归到 `--eid_idx`。需要完整帮助来确认控制通道模式、
-客户端远端地址参数及 EID 字符串格式；此时不能直接认定 `-S 127.0.0.1` 对 UB 模式有效。
+现场完整帮助确认：
+
+| 参数 | 准确语义 |
+| --- | --- |
+| `--mgmt_proto` | `tcp` 或 `ub`，默认 `tcp`；管理通道与 UB 数据通道分开 |
+| `-S` | TCP 管理模式为服务端 IP；UB 管理模式为服务端管理 EID |
+| `-P` | TCP 模式为端口；UB 模式为双方一致的服务端管理 Jetty ID，且小于 1024 |
+| `--mgmt_addr` | 仅在 UB 管理模式指定本地管理 EID，且该模式必填 |
+| `--eid_idx` | 数据设备的 EID 索引；后面的 server mgmt eid 说明实际属于 `-S` |
+| `-p` | 0 为 RM（默认），1 为 RC，2 为 UM |
+
+因此原命令默认使用 TCP 管理通道，`-S 127.0.0.1` 和 `-P 21116` 在该模式下有效，
+不要求 `--mgmt_addr`。不能仅因数据设备是 UB 就认定工具的管理通道也选了 UB。
+`-P 21116` 不适用于 UB 管理模式，不能仅加 `--mgmt_proto ub` 后照用原端口值。
+
+实际执行文件是 `/usr/bin/urma_perftest`，归属
+`umdk-urma-tools-25.12.0-B138.oe2403sp3.aarch64`，SHA256 为
+`e03bf302341a92b266c384a898c4f2251c58f9a314729b32f47b0509898a49b4`。
+现场 `send_lat --help` 报 unrecognized option 后打印帮助，帮助本身的退出状态
+不能当作硬件测试结果；后续可尝试帮助中列出的短参数 `-h`。
 
 用户输出中夹带的分析段落和未执行命令不作为测试证据。尤其是最后一组 mgmt_addr
 建议省略了 `-p 1`，按通用手册会回到 RM 默认值，不能当作原 RC/OT 用例的修正结果。
 EID 的选择依据实际拓扑和 SDK 契约，不能根据十六进制字符串中出现的某个字节猜测。
 目前也没有证据确认 204 已有可用的原生 UB 路径。
 
-下一步在 202 一次性采集完整工具帮助及二进制身份；此阶段不创建传输资源：
+## 下一步：只读检查控制面与失败日志
+
+目前没有 SDK 的具体错误原因，不能根据 import/bind 的通用报错指定某个修复参数。
+[官方接口说明](https://docs.openeuler.org/zh/docs/24.03_LTS_SP4/unifiedbus/unifiedbus/urma/URMA%20API%20Guide.ch.html)
+列出了控制面 UVS 无响应导致 import 失败的情形；它是需要排查的方向，不是已确认根因。
+先读取现有状态和最近失败日志，不启停服务、不重配设备：
 
 ```bash
 (
 set +e
-help_root=$(mktemp -d "$HOME/valkey-validation/ub-perftest-help.XXXXXX") || exit 1
-tool_path=$(command -v urma_perftest) || exit 1
-real_path=$(readlink -f "$tool_path") || exit 1
-printf 'command=%s\nreal_path=%s\n' "$tool_path" "$real_path" > "$help_root/tool.txt"
-sha256sum "$real_path" >> "$help_root/tool.txt"
-rpm -qf "$real_path" > "$help_root/package.txt" 2>&1
-"$tool_path" send_lat --help > "$help_root/help.txt" 2>&1
-printf '%s\n' "$?" > "$help_root/help.exit"
-cat "$help_root/tool.txt" "$help_root/package.txt" "$help_root/help.txt"
-printf 'HELP_EVIDENCE=%s\n' "$help_root"
+state_root=$(mktemp -d "$HOME/valkey-validation/ub-control-state.XXXXXX") || exit 1
+{
+  date -Iseconds
+  ps -eo pid,comm | grep -Ei 'uvs|tpsa'
+  systemctl list-units --all --type=service --no-pager --full | grep -Ei 'uvs|tpsa'
+  journalctl --since '-30 min' --no-pager -o short-precise \
+    _COMM=urma_perftest _UID="$(id -u)"
+  journalctl -k --since '-30 min' --no-pager | grep -Ei 'ubcore|uburma|udma|uvs|tpsa'
+} > "$state_root/state.log" 2>&1
+cat "$state_root/state.log"
+printf 'STATE_EVIDENCE=%s\n' "$state_root"
 )
 ```
 
-确认现场 CLI 契约后，再固定一组配对命令，明确本地/远端管理 EID、RC、共享 JFR、
-OT、设备、EID index 和端口；一次只改变一个变量。未核对前不批量更换设备/EID，
-不混加 CTP、tp_aware、simplex，也不修改控制面配置。
+服务名可能不同，因此没有匹配结果不等于证明服务不存在；日志不可读或被其他
+syslog 服务转存时，也不能将空输出视为没有错误。保留权限提示，必要时由现场管理员
+协助导出对应时段日志。近 30 分钟未覆盖本轮失败时，按实际时间扩大查询窗口。
+
+若需重跑来抓日志，使用进程级 `URMA_LOG_LEVEL=debug`，明确保留
+`--mgmt_proto tcp -p 1 --order_type 1 --share_jfr true -O 0`，设备、EID 和端口保持一致。
+SDK 参考实现默认将日志送往 syslog，单独设置日志级别不保证错误会打印到终端。
+当前未验证 `URMA_LOG_PATH` 为现场 SDK 支持的接口，不提供该变量作为日志重定向方案。
+不要批量更换设备/EID、混加 CTP/tp_aware/simplex，或把用户态 TP 建链选项直接当作
+默认控制面的修复。每种路径应单独记录并核对与 Valkey 适配器的契约是否一致。
 
 即使 SDK 收发完成，仍需严格的接收顺序、Payload 完整性、分段/credit/CLOSE 验证，
 才进入 Valkey 功能验收。perftest 延迟不直接与 Valkey benchmark 的 QPS 比较。
