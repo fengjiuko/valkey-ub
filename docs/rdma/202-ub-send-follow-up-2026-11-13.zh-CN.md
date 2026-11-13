@@ -1,5 +1,9 @@
 # 2026-11-13 UB 独立测试进展与下一步带宽补测
 
+**后续执行结果：** 完整带宽组 `/root/ub-loopback-pgmHKa7Q` 在 64 B 第 1 轮出现 CR status 10，
+只有 1 个有效正式样本。现在转为 [固定次数诊断](202-ub-send-rnr-diagnostic-2026-11-13.zh-CN.md)，
+暂不重复下文的完整矩阵命令；下文保留延迟和单点复测当时的记录。
+
 ## 1. 本轮结论
 
 - **UB 延迟独立组已完成 25/25 个有效正式样本**：2、64、256、1024、4096 B，各五轮，每轮 100000 次；双端退出码均为 0。
@@ -18,7 +22,7 @@
 | UB 1024 B 带宽单点 | `/root/ub-loopback-GCeYcttb` | valid=1、invalid=0、planned=1 |
 | 历史 RDMA 基线 | `/root/rdma-send-loopback-UF9iIygF` | 五个尺寸延迟/带宽各五轮，50 个有效样本 |
 
-本次来源为本地 `D:\valkey\output.md`，SHA256：
+本节来源为本地 `D:\valkey\output.md` 的本轮延迟/单点回传版本（工作区文件随后又有更新），SHA256：
 `f041cfdae791be2b8033613d80a525e7d75ae61ca1b5da012e5c9d967b46ce38`。
 
 已逐条核对本次 25 个正式延迟标签、双端退出码、100000 次迭代和尺寸/轮次完整性，
